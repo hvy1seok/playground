@@ -163,6 +163,10 @@ class TimesNetTrainer:
         if self.config.use_wandb and self.wandb_run:
             cm = confusion_matrix(y_true, y_pred)
             
+            # class_names가 None이면 기본값 사용
+            if class_names is None:
+                class_names = [f'Class {i}' for i in range(cm.shape[0])]
+            
             # 혼동 행렬 시각화
             plt.figure(figsize=(10, 8))
             sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 

@@ -98,6 +98,11 @@ class PatchTSTTrainer:
         """혼동 행렬 로깅"""
         cm = confusion_matrix(y_true, y_pred)
         plt.figure(figsize=(10, 8))
+        
+        # class_names가 None이면 기본값 사용
+        if class_names is None:
+            class_names = [f'Class {i}' for i in range(cm.shape[0])]
+        
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
                    xticklabels=class_names, yticklabels=class_names)
         plt.title('Confusion Matrix')
