@@ -8,6 +8,7 @@ import os
 import sys
 import argparse
 import time
+import random
 import numpy as np
 import pandas as pd
 import torch
@@ -19,6 +20,18 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import matplotlib.pyplot as plt
 import seaborn as sns
 import wandb
+
+# 시드 고정 함수
+def set_seed(seed=42):
+    """재현 가능한 결과를 위한 시드 고정"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print(f"시드 고정 완료: {seed}")
 
 # Time-Series-Library 경로 추가
 sys.path.append('./Time-Series-Library')
@@ -508,6 +521,9 @@ def load_and_preprocess_data(scaling_method='standard', scaling_scope='global'):
 
 def main():
     """메인 함수"""
+    # 시드 고정
+    set_seed(42)
+    
     # 명령행 인자 파싱
     parser = argparse.ArgumentParser(description='iTransformer 분류 모델 학습')
     
