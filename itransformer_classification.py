@@ -469,8 +469,8 @@ def load_and_preprocess_data(scaling_method='standard', scaling_scope='global'):
     print("데이터 로딩 중...")
     
     # 데이터 로드
-    train_df = pd.read_csv("./datasets/train.csv")
-    test_df = pd.read_csv("./datasets/test.csv")
+    train_df = pd.read_csv("./datasests/train.csv")
+    test_df = pd.read_csv("./datasests/test.csv")
     
     print(f"Train 데이터: {train_df.shape}")
     print(f"Test 데이터: {test_df.shape}")
