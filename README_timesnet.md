@@ -76,6 +76,9 @@ python timesnet_classification.py --scaling minmax
 
 # RobustScaler (기존 방식)
 python timesnet_classification.py --scaling robust
+
+# 스케일링 없음 (원본 데이터 그대로 사용)
+python timesnet_classification.py --scaling none
 ```
 
 #### 스케줄러 선택

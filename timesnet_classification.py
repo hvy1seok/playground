@@ -471,6 +471,14 @@ def fft_friendly_scaling(X_train, X_val, X_test, method='standard'):
         X_test_scaled = scaler.transform(X_test)
         print("RobustScaler 적용 (기존 방식)")
         
+    elif method == 'none':
+        # 스케일링 없음 (원본 데이터 그대로 사용)
+        X_train_scaled = X_train.copy()
+        X_val_scaled = X_val.copy()
+        X_test_scaled = X_test.copy()
+        scaler = None
+        print("스케일링 없음 (원본 데이터 사용)")
+        
     else:
         raise ValueError(f"Unknown scaling method: {method}")
     
@@ -518,7 +526,7 @@ def main():
     
     # 정규화 방법 선택
     parser.add_argument('--scaling', type=str, default='standard',
-                       choices=['standard', 'minmax', 'robust', 'sequence'],
+                       choices=['standard', 'minmax', 'robust', 'sequence', 'none'],
                        help='정규화 방법 선택 (default: standard)')
     
     # 스케줄러 선택
