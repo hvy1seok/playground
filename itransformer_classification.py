@@ -76,8 +76,8 @@ class ClassWeightedFocalLoss(nn.Module):
         ce_loss = F.cross_entropy(inputs, targets, reduction='none')
         pt = torch.exp(-ce_loss)
         
-        # 클래스별 가중치 적용
-        weights = self.class_weights[targets].to(inputs.device)
+        # 클래스별 가중치 적용 (GPU로 이동)
+        weights = self.class_weights.to(inputs.device)[targets]
         focal_loss = weights * self.alpha * (1 - pt) ** self.gamma * ce_loss
         
         return focal_loss.mean()
@@ -565,6 +565,8 @@ class iTransformerTrainer:
                 alpha=self.config.focal_alpha,
                 gamma=self.config.focal_gamma
             ).to(self.device)
+            # 클래스 가중치를 GPU로 이동
+            self.focal_loss.class_weights = self.focal_loss.class_weights.to(self.device)
         
         if self.config.use_contrastive_loss:
             self.contrastive_loss = SupConLoss(temperature=0.07).to(self.device)
