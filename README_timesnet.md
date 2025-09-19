@@ -58,8 +58,60 @@ python test_timesnet.py
 
 테스트가 성공하면 모델을 학습합니다:
 
+#### 기본 학습 (권장 설정)
 ```bash
 python timesnet_classification.py
+```
+
+#### 정규화 방법 선택
+```bash
+# StandardScaler (FFT에 가장 적합)
+python timesnet_classification.py --scaling standard
+
+# 시계열별 정규화
+python timesnet_classification.py --scaling sequence
+
+# MinMaxScaler
+python timesnet_classification.py --scaling minmax
+
+# RobustScaler (기존 방식)
+python timesnet_classification.py --scaling robust
+```
+
+#### 스케줄러 선택
+```bash
+# 코사인 어닐링 (권장)
+python timesnet_classification.py --scheduler cosine
+
+# 플래토 스케줄러
+python timesnet_classification.py --scheduler plateau
+
+# 워밍업 + 코사인
+python timesnet_classification.py --scheduler warmup_cosine
+
+# 스텝 스케줄러
+python timesnet_classification.py --scheduler step
+```
+
+#### 하이퍼파라미터 조정
+```bash
+# 큰 모델로 학습
+python timesnet_classification.py --e_layers 3 --d_model 96 --d_ff 192 --top_k 7 --num_kernels 8
+
+# 빠른 학습 (작은 모델)
+python timesnet_classification.py --e_layers 1 --d_model 32 --d_ff 64 --epochs 20
+
+# 학습률 조정
+python timesnet_classification.py --learning_rate 0.0005 --batch_size 32
+
+# Wandb 비활성화
+python timesnet_classification.py --no_wandb
+```
+
+#### 실험 실행 스크립트
+```bash
+# 미리 정의된 실험들 실행
+python run_experiments.py
 ```
 
 ## 모델 특징

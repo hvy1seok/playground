@@ -55,7 +55,7 @@ class TimesNetConfig:
         self.device = torch.device('cuda' if self.use_gpu else 'cpu')
         
         # Learning rate adjustment 설정
-        self.lradj = 'type1'  # learning rate adjustment 타입
+        self.lradj = 'cosine'  # learning rate adjustment 타입 (cosine, type1, type2, type3, step, plateau)
         
         # Wandb 설정
         self.use_wandb = True  # False로 설정하면 Wandb 로깅 비활성화
@@ -204,7 +204,45 @@ class TimesNetTrainer:
         self.criterion = nn.CrossEntropyLoss()
         self.early_stopping = EarlyStopping(patience=self.config.patience, verbose=True)
         
+        # 스케줄러 설정
+        self.scheduler = self._create_scheduler()
+        
         print(f"모델 파라미터 수: {sum(p.numel() for p in self.model.parameters()):,}")
+        print(f"스케줄러: {self.config.lradj}")
+    
+    def _create_scheduler(self):
+        """스케줄러 생성"""
+        if self.config.lradj == 'cosine':
+            # 코사인 어닐링 (가장 권장)
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=self.config.train_epochs, eta_min=1e-6
+            )
+        elif self.config.lradj == 'step':
+            # 스텝 스케줄러 (매 10 에포크마다 0.1배)
+            return torch.optim.lr_scheduler.StepLR(
+                self.optimizer, step_size=10, gamma=0.1
+            )
+        elif self.config.lradj == 'plateau':
+            # 플래토 스케줄러 (검증 손실이 개선되지 않으면 감소)
+            return torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, mode='max', factor=0.5, patience=3, verbose=True
+            )
+        elif self.config.lradj == 'exponential':
+            # 지수 감소 스케줄러
+            return torch.optim.lr_scheduler.ExponentialLR(
+                self.optimizer, gamma=0.95
+            )
+        elif self.config.lradj == 'warmup_cosine':
+            # 워밍업 + 코사인 어닐링
+            def lr_lambda(epoch):
+                if epoch < 5:  # 워밍업
+                    return epoch / 5
+                else:  # 코사인 어닐링
+                    return 0.5 * (1 + np.cos(np.pi * (epoch - 5) / (self.config.train_epochs - 5)))
+            return torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
+        else:
+            # 기본값: 스케줄러 없음
+            return None
         
     def create_time_series_data(self, X):
         """특성 벡터를 시계열 데이터로 변환"""
@@ -356,7 +394,16 @@ class TimesNetTrainer:
                 break
             
             # Learning rate scheduling
-            adjust_learning_rate(self.optimizer, epoch + 1, self.config)
+            if self.scheduler is not None:
+                if self.config.lradj == 'plateau':
+                    # 플래토 스케줄러는 검증 손실을 기준으로 함
+                    self.scheduler.step(val_macro_f1)
+                else:
+                    # 다른 스케줄러들은 에포크 기준
+                    self.scheduler.step()
+            else:
+                # 기존 방식 (type1, type2, type3, cosine)
+                adjust_learning_rate(self.optimizer, epoch + 1, self.config)
     
     def predict(self, test_loader, return_probabilities=False):
         """예측"""
@@ -464,16 +511,82 @@ def load_and_preprocess_data(scaling_method='standard'):
     
     return X_train_scaled, X_val_scaled, y_train, y_val, X_test_scaled, test_ids, scaler
 
-def main(scaling_method='standard'):
+def main():
     """메인 함수"""
+    # 명령행 인자 파싱
+    parser = argparse.ArgumentParser(description='TimesNet 분류 모델 학습')
+    
+    # 정규화 방법 선택
+    parser.add_argument('--scaling', type=str, default='standard',
+                       choices=['standard', 'minmax', 'robust', 'sequence'],
+                       help='정규화 방법 선택 (default: standard)')
+    
+    # 스케줄러 선택
+    parser.add_argument('--scheduler', type=str, default='cosine',
+                       choices=['cosine', 'step', 'plateau', 'exponential', 'warmup_cosine', 'type1', 'type2', 'type3'],
+                       help='학습률 스케줄러 선택 (default: cosine)')
+    
+    # 모델 하이퍼파라미터
+    parser.add_argument('--e_layers', type=int, default=2,
+                       help='TimesBlock 레이어 수 (default: 2)')
+    parser.add_argument('--d_model', type=int, default=64,
+                       help='모델 차원 (default: 64)')
+    parser.add_argument('--d_ff', type=int, default=128,
+                       help='Feed-forward 차원 (default: 128)')
+    parser.add_argument('--top_k', type=int, default=5,
+                       help='FFT에서 선택할 상위 k개 주기 (default: 5)')
+    parser.add_argument('--num_kernels', type=int, default=6,
+                       help='Inception block의 커널 수 (default: 6)')
+    
+    # 학습 설정
+    parser.add_argument('--learning_rate', type=float, default=0.001,
+                       help='학습률 (default: 0.001)')
+    parser.add_argument('--batch_size', type=int, default=64,
+                       help='배치 크기 (default: 64)')
+    parser.add_argument('--epochs', type=int, default=50,
+                       help='학습 에포크 수 (default: 50)')
+    parser.add_argument('--patience', type=int, default=10,
+                       help='Early stopping patience (default: 10)')
+    
+    # Wandb 설정
+    parser.add_argument('--use_wandb', action='store_true', default=True,
+                       help='Wandb 로깅 사용 (default: True)')
+    parser.add_argument('--no_wandb', dest='use_wandb', action='store_false',
+                       help='Wandb 로깅 비활성화')
+    parser.add_argument('--wandb_project', type=str, default='timesnet-classification',
+                       help='Wandb 프로젝트 이름 (default: timesnet-classification)')
+    
+    args = parser.parse_args()
+    
     print("TimesNet 분류 모델 학습 시작")
+    print("=" * 50)
+    print(f"정규화 방법: {args.scaling}")
+    print(f"스케줄러: {args.scheduler}")
+    print(f"모델 설정: e_layers={args.e_layers}, d_model={args.d_model}, d_ff={args.d_ff}")
+    print(f"학습 설정: lr={args.learning_rate}, batch_size={args.batch_size}, epochs={args.epochs}")
+    print(f"Wandb 사용: {args.use_wandb}")
     print("=" * 50)
     
     # 데이터 로드 및 전처리
-    X_train, X_val, y_train, y_val, X_test, test_ids, scaler = load_and_preprocess_data(scaling_method)
+    X_train, X_val, y_train, y_val, X_test, test_ids, scaler = load_and_preprocess_data(args.scaling)
     
     # 설정 및 트레이너 초기화
     config = TimesNetConfig()
+    
+    # 명령행 인자로 설정 업데이트
+    config.lradj = args.scheduler
+    config.e_layers = args.e_layers
+    config.d_model = args.d_model
+    config.d_ff = args.d_ff
+    config.top_k = args.top_k
+    config.num_kernels = args.num_kernels
+    config.learning_rate = args.learning_rate
+    config.batch_size = args.batch_size
+    config.train_epochs = args.epochs
+    config.patience = args.patience
+    config.use_wandb = args.use_wandb
+    config.wandb_project = args.wandb_project
+    
     trainer = TimesNetTrainer(config)
     
     # 데이터 준비 (시계열 변환 후 설정 업데이트)
