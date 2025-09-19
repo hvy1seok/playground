@@ -22,8 +22,6 @@ from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 import seaborn as sns
 import wandb
-from scipy import signal
-from scipy.stats import skew, kurtosis
 
 # 시드 고정 함수
 def set_seed(seed=42):
@@ -150,132 +148,6 @@ class SupConLoss(nn.Module):
         
         return loss
 
-# 데이터 증강 기법들
-class TimeWarp:
-    """Time Warping augmentation"""
-    def __init__(self, sigma=0.2):
-        self.sigma = sigma
-    
-    def __call__(self, x):
-        # x: [seq_len, features]
-        seq_len = x.shape[0]
-        warp_steps = np.arange(seq_len)
-        
-        # Generate warping curve
-        warp_curve = np.random.normal(0, self.sigma, seq_len)
-        warp_curve = np.cumsum(warp_curve)
-        warp_curve = warp_curve - warp_curve[0]
-        warp_curve = warp_curve * (seq_len - 1) / warp_curve[-1]
-        
-        # Apply warping
-        warped_x = np.zeros_like(x)
-        for i in range(seq_len):
-            idx = int(warp_curve[i])
-            if 0 <= idx < seq_len:
-                warped_x[i] = x[idx]
-            else:
-                warped_x[i] = x[i]
-        
-        return warped_x
-
-class Jitter:
-    """Jittering augmentation"""
-    def __init__(self, sigma=0.03):
-        self.sigma = sigma
-    
-    def __call__(self, x):
-        noise = np.random.normal(0, self.sigma, x.shape)
-        return x + noise
-
-class WindowSlicing:
-    """Window Slicing augmentation"""
-    def __init__(self, reduce_ratio=0.9):
-        self.reduce_ratio = reduce_ratio
-    
-    def __call__(self, x):
-        seq_len = x.shape[0]
-        target_len = int(seq_len * self.reduce_ratio)
-        
-        if target_len < seq_len:
-            start = np.random.randint(0, seq_len - target_len)
-            return x[start:start + target_len]
-        return x
-
-class TSMixup:
-    """Time Series Mixup augmentation"""
-    def __init__(self, alpha=0.2):
-        self.alpha = alpha
-    
-    def __call__(self, x1, x2, y1, y2):
-        # x1, x2: [seq_len, features]
-        # y1, y2: class labels
-        
-        if np.random.random() < 0.5:
-            # Mixup
-            lam = np.random.beta(self.alpha, self.alpha)
-            mixed_x = lam * x1 + (1 - lam) * x2
-            mixed_y = lam * y1 + (1 - lam) * y2
-        else:
-            # CutMix
-            seq_len = x1.shape[0]
-            cut_len = int(seq_len * np.random.beta(self.alpha, self.alpha))
-            start = np.random.randint(0, seq_len - cut_len)
-            
-            mixed_x = x1.copy()
-            mixed_x[start:start + cut_len] = x2[start:start + cut_len]
-            mixed_y = y1  # Keep original label for cutmix
-        
-        return mixed_x, mixed_y
-
-# 특징 추출 함수들
-def extract_statistical_features(x):
-    """통계적 특징 추출"""
-    features = []
-    
-    # 기본 통계량
-    features.extend([np.mean(x), np.std(x), np.min(x), np.max(x)])
-    features.extend([np.median(x), skew(x), kurtosis(x)])
-    
-    # 분위수
-    features.extend([np.percentile(x, q) for q in [25, 75, 90, 95]])
-    
-    # 변화율
-    diff = np.diff(x, axis=0)
-    features.extend([np.mean(diff), np.std(diff)])
-    
-    return np.array(features)
-
-def extract_fft_features(x):
-    """FFT 특징 추출"""
-    fft = np.fft.fft(x, axis=0)
-    magnitude = np.abs(fft)
-    
-    features = []
-    # 주파수 도메인 통계량
-    features.extend([np.mean(magnitude), np.std(magnitude)])
-    features.extend([np.max(magnitude), np.argmax(magnitude)])
-    
-    # 주파수 밴드별 에너지
-    n = len(magnitude) // 2
-    features.extend([np.sum(magnitude[:n//4]), np.sum(magnitude[n//4:n//2])])
-    
-    return np.array(features)
-
-def extract_wavelet_features(x):
-    """웨이블릿 특징 추출"""
-    try:
-        from pywt import dwt
-        coeffs = dwt(x, 'db4')
-        cA, cD = coeffs
-        
-        features = []
-        features.extend([np.mean(cA), np.std(cA), np.mean(cD), np.std(cD)])
-        features.extend([np.sum(cA**2), np.sum(cD**2)])  # 에너지
-        
-        return np.array(features)
-    except ImportError:
-        # pywt가 없으면 기본 특징으로 대체
-        return np.array([0, 0, 0, 0, 0, 0])
 
 class iTransformerConfig:
     """iTransformer 설정 클래스"""
@@ -314,21 +186,12 @@ class iTransformerConfig:
         self.use_focal_loss = True         # Focal Loss 사용
         self.use_contrastive_loss = True   # Contrastive Loss 사용
         self.use_margin_loss = True        # Margin Loss 사용
-        self.use_data_augmentation = True  # 데이터 증강 사용
-        self.use_feature_engineering = True # 특징 엔지니어링 사용
         
         # 손실 함수 가중치
         self.focal_alpha = 1.0
         self.focal_gamma = 2.0
         self.contrastive_weight = 0.1
         self.margin_weight = 0.1
-        
-        # 데이터 증강 설정
-        self.augmentation_prob = 0.5
-        self.timewarp_sigma = 0.2
-        self.jitter_sigma = 0.03
-        self.window_slice_ratio = 0.9
-        self.mixup_alpha = 0.2
         
         # 문제 클래스 설정 (0, 9, 15)
         self.problem_classes = [0, 9, 15]
@@ -355,12 +218,6 @@ class iTransformerTrainer:
         self.focal_loss = None
         self.contrastive_loss = None
         self.margin_loss = None
-        
-        # 데이터 증강 기법들
-        self.timewarp = TimeWarp(sigma=self.config.timewarp_sigma)
-        self.jitter = Jitter(sigma=self.config.jitter_sigma)
-        self.window_slice = WindowSlicing(reduce_ratio=self.config.window_slice_ratio)
-        self.tsmixup = TSMixup(alpha=self.config.mixup_alpha)
         
         # 클래스별 threshold (나중에 계산)
         self.class_thresholds = None
@@ -429,82 +286,11 @@ class iTransformerTrainer:
         X_ts = X.reshape(X.shape[0], X.shape[1], 1)  # [N, 52, 1]
         return X_ts
     
-    def augment_data(self, X, y):
-        """데이터 증강 적용"""
-        if not self.config.use_data_augmentation:
-            return X, y
-        
-        augmented_X = []
-        augmented_y = []
-        
-        for i in range(len(X)):
-            x = X[i]
-            label = y[i]
-            
-            # 원본 데이터 추가
-            augmented_X.append(x)
-            augmented_y.append(label)
-            
-            # 문제 클래스에 대해서만 추가 증강
-            if label in self.config.problem_classes and np.random.random() < self.config.augmentation_prob:
-                # TimeWarp
-                if np.random.random() < 0.3:
-                    warped_x = self.timewarp(x)
-                    augmented_X.append(warped_x)
-                    augmented_y.append(label)
-                
-                # Jitter
-                if np.random.random() < 0.3:
-                    jittered_x = self.jitter(x)
-                    augmented_X.append(jittered_x)
-                    augmented_y.append(label)
-                
-                # Window Slicing
-                if np.random.random() < 0.3:
-                    sliced_x = self.window_slice(x)
-                    if sliced_x.shape[0] == x.shape[0]:  # 길이가 같을 때만 추가
-                        augmented_X.append(sliced_x)
-                        augmented_y.append(label)
-        
-        return np.array(augmented_X), np.array(augmented_y)
-    
-    def extract_engineered_features(self, X):
-        """엔지니어링된 특징 추출"""
-        if not self.config.use_feature_engineering:
-            return X
-        
-        engineered_features = []
-        
-        for i in range(len(X)):
-            x = X[i].flatten()  # [seq_len]으로 변환
-            
-            # 통계적 특징
-            stat_features = extract_statistical_features(x)
-            
-            # FFT 특징
-            fft_features = extract_fft_features(x)
-            
-            # 웨이블릿 특징
-            wavelet_features = extract_wavelet_features(x)
-            
-            # 모든 특징 결합
-            combined_features = np.concatenate([stat_features, fft_features, wavelet_features])
-            engineered_features.append(combined_features)
-        
-        return np.array(engineered_features)
     
     def prepare_data(self, X_train, y_train, X_val, y_val, X_test):
         """데이터 준비 및 DataLoader 생성"""
-        # 데이터 증강 적용 (문제 클래스에 집중)
-        if self.config.use_data_augmentation:
-            print("데이터 증강 적용 중...")
-            X_train_aug, y_train_aug = self.augment_data(X_train, y_train)
-            print(f"증강 후 Train 데이터: {X_train_aug.shape}")
-        else:
-            X_train_aug, y_train_aug = X_train, y_train
-        
         # 시계열 데이터로 변환
-        X_train_ts = self.create_time_series_data(X_train_aug)
+        X_train_ts = self.create_time_series_data(X_train)
         X_val_ts = self.create_time_series_data(X_val)
         X_test_ts = self.create_time_series_data(X_test)
         
@@ -513,15 +299,15 @@ class iTransformerTrainer:
         # 설정 업데이트
         self.config.seq_len = X_train_ts.shape[1]
         self.config.enc_in = X_train_ts.shape[2]
-        self.config.num_class = len(np.unique(y_train_aug))
+        self.config.num_class = len(np.unique(y_train))
         
         print(f"업데이트된 설정 - seq_len: {self.config.seq_len}, enc_in: {self.config.enc_in}")
         
         # 클래스별 샘플링 가중치 계산 (WeightedRandomSampler)
         if self.config.use_class_weights:
-            class_counts = np.bincount(y_train_aug)
+            class_counts = np.bincount(y_train)
             class_weights = 1.0 / class_counts
-            sample_weights = class_weights[y_train_aug]
+            sample_weights = class_weights[y_train]
             sampler = WeightedRandomSampler(
                 weights=sample_weights,
                 num_samples=len(sample_weights),
@@ -535,7 +321,7 @@ class iTransformerTrainer:
         # DataLoader 생성
         train_dataset = TensorDataset(
             torch.tensor(X_train_ts, dtype=torch.float32),
-            torch.tensor(y_train_aug, dtype=torch.long)
+            torch.tensor(y_train, dtype=torch.long)
         )
         val_dataset = TensorDataset(
             torch.tensor(X_val_ts, dtype=torch.float32),
@@ -593,8 +379,7 @@ class iTransformerTrainer:
         print(f"  - Focal Loss: {self.config.use_focal_loss}")
         print(f"  - Contrastive Loss: {self.config.use_contrastive_loss}")
         print(f"  - Margin Loss: {self.config.use_margin_loss}")
-        print(f"  - Data Augmentation: {self.config.use_data_augmentation}")
-        print(f"  - Feature Engineering: {self.config.use_feature_engineering}")
+        print(f"  - Class Weights: {self.config.use_class_weights}")
     
     def _create_scheduler(self):
         """학습률 스케줄러 생성"""
@@ -1031,10 +816,6 @@ def main():
                        help='Contrastive Loss 사용 (default: True)')
     parser.add_argument('--use_margin_loss', action='store_true', default=True,
                        help='Margin Loss 사용 (default: True)')
-    parser.add_argument('--use_data_augmentation', action='store_true', default=True,
-                       help='데이터 증강 사용 (default: True)')
-    parser.add_argument('--use_feature_engineering', action='store_true', default=True,
-                       help='특징 엔지니어링 사용 (default: True)')
     parser.add_argument('--use_class_weights', action='store_true', default=True,
                        help='클래스 가중치 사용 (default: True)')
     
@@ -1047,16 +828,6 @@ def main():
                        help='Contrastive Loss 가중치 (default: 0.1)')
     parser.add_argument('--margin_weight', type=float, default=0.1,
                        help='Margin Loss 가중치 (default: 0.1)')
-    
-    # 데이터 증강 설정
-    parser.add_argument('--augmentation_prob', type=float, default=0.5,
-                       help='데이터 증강 확률 (default: 0.5)')
-    parser.add_argument('--timewarp_sigma', type=float, default=0.2,
-                       help='TimeWarp 시그마 (default: 0.2)')
-    parser.add_argument('--jitter_sigma', type=float, default=0.03,
-                       help='Jitter 시그마 (default: 0.03)')
-    parser.add_argument('--mixup_alpha', type=float, default=0.2,
-                       help='TSMixup 알파 (default: 0.2)')
     
     args = parser.parse_args()
     
@@ -1097,8 +868,6 @@ def main():
     config.use_focal_loss = args.use_focal_loss
     config.use_contrastive_loss = args.use_contrastive_loss
     config.use_margin_loss = args.use_margin_loss
-    config.use_data_augmentation = args.use_data_augmentation
-    config.use_feature_engineering = args.use_feature_engineering
     config.use_class_weights = args.use_class_weights
     
     # 손실 함수 가중치 설정
@@ -1106,12 +875,6 @@ def main():
     config.focal_gamma = args.focal_gamma
     config.contrastive_weight = args.contrastive_weight
     config.margin_weight = args.margin_weight
-    
-    # 데이터 증강 설정
-    config.augmentation_prob = args.augmentation_prob
-    config.timewarp_sigma = args.timewarp_sigma
-    config.jitter_sigma = args.jitter_sigma
-    config.mixup_alpha = args.mixup_alpha
     
     trainer = iTransformerTrainer(config)
     
