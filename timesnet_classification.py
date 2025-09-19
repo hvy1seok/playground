@@ -428,26 +428,40 @@ class TimesNetTrainer:
             return np.array(all_preds), np.array(all_probs)
         return np.array(all_preds)
 
-def fft_friendly_scaling(X_train, X_val, X_test, method='standard'):
+def fft_friendly_scaling(X_train, X_val, X_test, method='standard', scope='global'):
     """FFT에 적합한 정규화 방법들"""
     
     if method == 'standard':
         # StandardScaler 사용 (FFT에 가장 적합)
         from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_val_scaled = scaler.transform(X_val)
-        X_test_scaled = scaler.transform(X_test)
-        print("StandardScaler 적용 (FFT에 적합)")
+        if scope == 'global':
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_val_scaled = scaler.transform(X_val)
+            X_test_scaled = scaler.transform(X_test)
+            print("StandardScaler 적용 (전체 데이터 기준, FFT에 적합)")
+        else:  # column
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_val_scaled = scaler.transform(X_val)
+            X_test_scaled = scaler.transform(X_test)
+            print("StandardScaler 적용 (컬럼별, FFT에 적합)")
         
     elif method == 'minmax':
         # MinMaxScaler 사용
         from sklearn.preprocessing import MinMaxScaler
-        scaler = MinMaxScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_val_scaled = scaler.transform(X_val)
-        X_test_scaled = scaler.transform(X_test)
-        print("MinMaxScaler 적용 (0-1 정규화)")
+        if scope == 'global':
+            scaler = MinMaxScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_val_scaled = scaler.transform(X_val)
+            X_test_scaled = scaler.transform(X_test)
+            print("MinMaxScaler 적용 (전체 데이터 기준, 0-1 정규화)")
+        else:  # column
+            scaler = MinMaxScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_val_scaled = scaler.transform(X_val)
+            X_test_scaled = scaler.transform(X_test)
+            print("MinMaxScaler 적용 (컬럼별, 0-1 정규화)")
         
     elif method == 'sequence':
         # 시계열별 정규화 (각 샘플의 시계열을 개별 정규화)
@@ -465,11 +479,18 @@ def fft_friendly_scaling(X_train, X_val, X_test, method='standard'):
     elif method == 'robust':
         # 기존 RobustScaler (비교용)
         from sklearn.preprocessing import RobustScaler
-        scaler = RobustScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_val_scaled = scaler.transform(X_val)
-        X_test_scaled = scaler.transform(X_test)
-        print("RobustScaler 적용 (기존 방식)")
+        if scope == 'global':
+            scaler = RobustScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_val_scaled = scaler.transform(X_val)
+            X_test_scaled = scaler.transform(X_test)
+            print("RobustScaler 적용 (전체 데이터 기준, 기존 방식)")
+        else:  # column
+            scaler = RobustScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_val_scaled = scaler.transform(X_val)
+            X_test_scaled = scaler.transform(X_test)
+            print("RobustScaler 적용 (컬럼별, 기존 방식)")
         
     elif method == 'none':
         # 스케일링 없음 (원본 데이터 그대로 사용)
@@ -484,7 +505,7 @@ def fft_friendly_scaling(X_train, X_val, X_test, method='standard'):
     
     return X_train_scaled, X_val_scaled, X_test_scaled, scaler
 
-def load_and_preprocess_data(scaling_method='standard'):
+def load_and_preprocess_data(scaling_method='standard', scaling_scope='global'):
     """데이터 로드 및 전처리"""
     print("데이터 로딩 중...")
     
@@ -504,18 +525,20 @@ def load_and_preprocess_data(scaling_method='standard'):
     print(f"클래스 개수: {len(np.unique(y))}")
     print(f"클래스 분포: {np.bincount(y)}")
     
-    # 학습/검증 분할 (정규화 전에 분할)
+    # 학습/검증 분할 (stratify=y로 클래스 비율 유지)
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, stratify=y, random_state=123
     )
     
+    print(f"Train: {X_train.shape}, Val: {X_val.shape}")
+    
     # FFT에 적합한 정규화 적용
     X_train_scaled, X_val_scaled, X_test_scaled, scaler = fft_friendly_scaling(
-        X_train, X_val, X_test, method=scaling_method
+        X_train, X_val, X_test, method=scaling_method, scope=scaling_scope
     )
     
     print(f"Train: {X_train_scaled.shape}, Val: {X_val_scaled.shape}")
-    print(f"정규화 방법: {scaling_method}")
+    print(f"정규화 방법: {scaling_method}, 범위: {scaling_scope}")
     
     return X_train_scaled, X_val_scaled, y_train, y_val, X_test_scaled, test_ids, scaler
 
@@ -528,6 +551,11 @@ def main():
     parser.add_argument('--scaling', type=str, default='standard',
                        choices=['standard', 'minmax', 'robust', 'sequence', 'none'],
                        help='정규화 방법 선택 (default: standard)')
+    
+    # 스케일링 범위 선택
+    parser.add_argument('--scaling_scope', type=str, default='global',
+                       choices=['global', 'column'],
+                       help='스케일링 범위 선택: global(전체), column(컬럼별) (default: global)')
     
     # 스케줄러 선택
     parser.add_argument('--scheduler', type=str, default='cosine',
@@ -569,6 +597,7 @@ def main():
     print("TimesNet 분류 모델 학습 시작")
     print("=" * 50)
     print(f"정규화 방법: {args.scaling}")
+    print(f"스케일링 범위: {args.scaling_scope}")
     print(f"스케줄러: {args.scheduler}")
     print(f"모델 설정: e_layers={args.e_layers}, d_model={args.d_model}, d_ff={args.d_ff}")
     print(f"학습 설정: lr={args.learning_rate}, batch_size={args.batch_size}, epochs={args.epochs}")
@@ -576,7 +605,7 @@ def main():
     print("=" * 50)
     
     # 데이터 로드 및 전처리
-    X_train, X_val, y_train, y_val, X_test, test_ids, scaler = load_and_preprocess_data(args.scaling)
+    X_train, X_val, y_train, y_val, X_test, test_ids, scaler = load_and_preprocess_data(args.scaling, args.scaling_scope)
     
     # 설정 및 트레이너 초기화
     config = TimesNetConfig()
