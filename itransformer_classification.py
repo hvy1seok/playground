@@ -150,8 +150,8 @@ class iTransformerConfig:
         self.use_margin_loss = True        # Margin Loss 사용
         
         # 손실 함수 가중치
-        self.contrastive_weight = 0.1
-        self.margin_weight = 0.1
+        self.contrastive_weight = 0.01  # 더 작은 가중치로 조정
+        self.margin_weight = 0.01       # 더 작은 가중치로 조정
         
         # 문제 클래스 설정 (0, 9, 15)
         self.problem_classes = [0, 9, 15]
@@ -365,8 +365,12 @@ class iTransformerTrainer:
         total_contrastive_loss = 0
         total_margin_loss = 0
         
-        # 기본 손실 함수
-        criterion = nn.CrossEntropyLoss()
+        # 기본 손실 함수 (클래스 가중치 적용)
+        if self.config.use_class_weights and self.config.class_weights is not None:
+            class_weights_tensor = torch.tensor(self.config.class_weights, dtype=torch.float32).to(self.device)
+            criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+        else:
+            criterion = nn.CrossEntropyLoss()
         
         for batch_x, batch_y in train_loader:
             batch_x = batch_x.to(self.device)
@@ -379,22 +383,23 @@ class iTransformerTrainer:
             
             # 기본 분류 손실
             loss = criterion(outputs, batch_y)
-            total_loss += loss.item()
             
             # Contrastive Loss (특징 추출 필요)
             if self.config.use_contrastive_loss and self.contrastive_loss is not None:
                 # 마지막 레이어의 특징 추출 (간단한 방법)
                 features = outputs  # 또는 별도 특징 추출
                 contrastive_loss = self.contrastive_loss(features, batch_y)
-                loss += self.config.contrastive_weight * contrastive_loss
+                loss = loss + self.config.contrastive_weight * contrastive_loss
                 total_contrastive_loss += contrastive_loss.item()
             
             # Margin Loss (특징 추출 필요)
             if self.config.use_margin_loss and self.margin_loss is not None:
                 features = outputs  # 또는 별도 특징 추출
                 margin_loss = self.margin_loss(features, batch_y)
-                loss += self.config.margin_weight * margin_loss
+                loss = loss + self.config.margin_weight * margin_loss
                 total_margin_loss += margin_loss.item() if hasattr(margin_loss, 'item') else margin_loss
+            
+            total_loss += loss.item()
             
             loss.backward()
             self.optimizer.step()
@@ -415,7 +420,13 @@ class iTransformerTrainer:
         total_loss = 0
         all_preds = []
         all_trues = []
-        criterion = nn.CrossEntropyLoss()
+        
+        # 기본 손실 함수 (클래스 가중치 적용)
+        if self.config.use_class_weights and self.config.class_weights is not None:
+            class_weights_tensor = torch.tensor(self.config.class_weights, dtype=torch.float32).to(self.device)
+            criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+        else:
+            criterion = nn.CrossEntropyLoss()
         
         with torch.no_grad():
             for batch_x, batch_y in val_loader:
@@ -489,6 +500,7 @@ class iTransformerTrainer:
             if train_metrics['margin_loss'] > 0:
                 print(f"  Margin Loss: {train_metrics['margin_loss']:.4f}")
             print(f"  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val Macro F1: {val_macro_f1:.4f}")
+            print(f"  Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
             print(f"  Time: {epoch_time:.2f}s")
             print("-" * 50)
             
@@ -748,10 +760,10 @@ def main():
                        help='Wandb 프로젝트 이름 (default: itransformer-classification-advanced)')
     
     # 고급 학습 설정
-    parser.add_argument('--use_contrastive_loss', action='store_true', default=True,
-                       help='Contrastive Loss 사용 (default: True)')
-    parser.add_argument('--use_margin_loss', action='store_true', default=True,
-                       help='Margin Loss 사용 (default: True)')
+    parser.add_argument('--use_contrastive_loss', action='store_true', default=False,
+                       help='Contrastive Loss 사용 (default: False)')
+    parser.add_argument('--use_margin_loss', action='store_true', default=False,
+                       help='Margin Loss 사용 (default: False)')
     parser.add_argument('--use_class_weights', action='store_true', default=True,
                        help='클래스 가중치 사용 (default: True)')
     
