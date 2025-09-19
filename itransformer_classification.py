@@ -42,43 +42,6 @@ from models.iTransformer import Model as iTransformer
 from utils.tools import EarlyStopping, adjust_learning_rate
 
 # 고급 손실 함수들
-class FocalLoss(nn.Module):
-    """Focal Loss for addressing class imbalance"""
-    def __init__(self, alpha=1, gamma=2, reduction='mean'):
-        super(FocalLoss, self).__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.reduction = reduction
-
-    def forward(self, inputs, targets):
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
-        pt = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
-        
-        if self.reduction == 'mean':
-            return focal_loss.mean()
-        elif self.reduction == 'sum':
-            return focal_loss.sum()
-        else:
-            return focal_loss
-
-class ClassWeightedFocalLoss(nn.Module):
-    """Class-weighted Focal Loss"""
-    def __init__(self, class_weights, alpha=1, gamma=2):
-        super(ClassWeightedFocalLoss, self).__init__()
-        self.class_weights = torch.tensor(class_weights, dtype=torch.float32)
-        self.alpha = alpha
-        self.gamma = gamma
-
-    def forward(self, inputs, targets):
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
-        pt = torch.exp(-ce_loss)
-        
-        # 클래스별 가중치 적용 (GPU로 이동)
-        weights = self.class_weights.to(inputs.device)[targets]
-        focal_loss = weights * self.alpha * (1 - pt) ** self.gamma * ce_loss
-        
-        return focal_loss.mean()
 
 class PairwiseMarginLoss(nn.Module):
     """Pairwise Margin Loss for difficult class pairs"""
@@ -183,13 +146,10 @@ class iTransformerConfig:
         
         # 고급 학습 설정
         self.use_class_weights = True      # 클래스 가중치 사용
-        self.use_focal_loss = True         # Focal Loss 사용
         self.use_contrastive_loss = True   # Contrastive Loss 사용
         self.use_margin_loss = True        # Margin Loss 사용
         
         # 손실 함수 가중치
-        self.focal_alpha = 1.0
-        self.focal_gamma = 2.0
         self.contrastive_weight = 0.1
         self.margin_weight = 0.1
         
@@ -215,7 +175,6 @@ class iTransformerTrainer:
         self.wandb_run = None
         
         # 고급 손실 함수들
-        self.focal_loss = None
         self.contrastive_loss = None
         self.margin_loss = None
         
@@ -350,15 +309,6 @@ class iTransformerTrainer:
         self.scheduler = self._create_scheduler()
         
         # 고급 손실 함수들 초기화
-        if self.config.use_focal_loss and self.config.class_weights is not None:
-            self.focal_loss = ClassWeightedFocalLoss(
-                class_weights=self.config.class_weights,
-                alpha=self.config.focal_alpha,
-                gamma=self.config.focal_gamma
-            ).to(self.device)
-            # 클래스 가중치를 GPU로 이동
-            self.focal_loss.class_weights = self.focal_loss.class_weights.to(self.device)
-        
         if self.config.use_contrastive_loss:
             self.contrastive_loss = SupConLoss(temperature=0.07).to(self.device)
         
@@ -376,7 +326,6 @@ class iTransformerTrainer:
         
         # 사용 중인 고급 기능들 출력
         print(f"사용 중인 고급 기능:")
-        print(f"  - Focal Loss: {self.config.use_focal_loss}")
         print(f"  - Contrastive Loss: {self.config.use_contrastive_loss}")
         print(f"  - Margin Loss: {self.config.use_margin_loss}")
         print(f"  - Class Weights: {self.config.use_class_weights}")
@@ -413,7 +362,6 @@ class iTransformerTrainer:
         """한 에포크 학습"""
         self.model.train()
         total_loss = 0
-        total_focal_loss = 0
         total_contrastive_loss = 0
         total_margin_loss = 0
         
@@ -430,11 +378,7 @@ class iTransformerTrainer:
             outputs = self.model(batch_x, None, None, None)
             
             # 기본 분류 손실
-            if self.config.use_focal_loss and self.focal_loss is not None:
-                loss = self.focal_loss(outputs, batch_y)
-            else:
-                loss = criterion(outputs, batch_y)
-            
+            loss = criterion(outputs, batch_y)
             total_loss += loss.item()
             
             # Contrastive Loss (특징 추출 필요)
@@ -456,13 +400,11 @@ class iTransformerTrainer:
             self.optimizer.step()
         
         avg_loss = total_loss / len(train_loader)
-        avg_focal = total_focal_loss / len(train_loader) if total_focal_loss > 0 else 0
         avg_contrastive = total_contrastive_loss / len(train_loader) if total_contrastive_loss > 0 else 0
         avg_margin = total_margin_loss / len(train_loader) if total_margin_loss > 0 else 0
         
         return {
             'total_loss': avg_loss,
-            'focal_loss': avg_focal,
             'contrastive_loss': avg_contrastive,
             'margin_loss': avg_margin
         }
@@ -533,8 +475,6 @@ class iTransformerTrainer:
             }
             
             # 고급 손실 함수들 로깅
-            if train_metrics['focal_loss'] > 0:
-                metrics['train_focal_loss'] = train_metrics['focal_loss']
             if train_metrics['contrastive_loss'] > 0:
                 metrics['train_contrastive_loss'] = train_metrics['contrastive_loss']
             if train_metrics['margin_loss'] > 0:
@@ -544,8 +484,6 @@ class iTransformerTrainer:
             
             print(f"Epoch {epoch+1}/{self.config.train_epochs}:")
             print(f"  Train Loss: {train_loss:.4f}")
-            if train_metrics['focal_loss'] > 0:
-                print(f"  Focal Loss: {train_metrics['focal_loss']:.4f}")
             if train_metrics['contrastive_loss'] > 0:
                 print(f"  Contrastive Loss: {train_metrics['contrastive_loss']:.4f}")
             if train_metrics['margin_loss'] > 0:
@@ -810,8 +748,6 @@ def main():
                        help='Wandb 프로젝트 이름 (default: itransformer-classification-advanced)')
     
     # 고급 학습 설정
-    parser.add_argument('--use_focal_loss', action='store_true', default=True,
-                       help='Focal Loss 사용 (default: True)')
     parser.add_argument('--use_contrastive_loss', action='store_true', default=True,
                        help='Contrastive Loss 사용 (default: True)')
     parser.add_argument('--use_margin_loss', action='store_true', default=True,
@@ -820,10 +756,6 @@ def main():
                        help='클래스 가중치 사용 (default: True)')
     
     # 손실 함수 가중치
-    parser.add_argument('--focal_alpha', type=float, default=1.0,
-                       help='Focal Loss alpha (default: 1.0)')
-    parser.add_argument('--focal_gamma', type=float, default=2.0,
-                       help='Focal Loss gamma (default: 2.0)')
     parser.add_argument('--contrastive_weight', type=float, default=0.1,
                        help='Contrastive Loss 가중치 (default: 0.1)')
     parser.add_argument('--margin_weight', type=float, default=0.1,
@@ -865,14 +797,11 @@ def main():
     config.class_weights = class_weights
     
     # 고급 학습 설정 적용
-    config.use_focal_loss = args.use_focal_loss
     config.use_contrastive_loss = args.use_contrastive_loss
     config.use_margin_loss = args.use_margin_loss
     config.use_class_weights = args.use_class_weights
     
     # 손실 함수 가중치 설정
-    config.focal_alpha = args.focal_alpha
-    config.focal_gamma = args.focal_gamma
     config.contrastive_weight = args.contrastive_weight
     config.margin_weight = args.margin_weight
     
