@@ -15,13 +15,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 import seaborn as sns
 import wandb
+import pickle
+import os
 
 # 시드 고정 함수
 def set_seed(seed=42):
@@ -239,6 +241,201 @@ class TSMixup:
         
         return mixed_x, mixed_y
 
+# CV 앙상블 관련 함수들
+def save_model_checkpoint(model, scaler, fold, cv_score, save_dir="cv_models"):
+    """모델과 스케일러를 저장"""
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 모델 저장
+    model_path = os.path.join(save_dir, f"model_fold_{fold}.pth")
+    torch.save(model.state_dict(), model_path)
+    
+    # 스케일러 저장
+    scaler_path = os.path.join(save_dir, f"scaler_fold_{fold}.pkl")
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
+    
+    # 메타데이터 저장
+    metadata = {
+        'fold': fold,
+        'cv_score': cv_score,
+        'model_path': model_path,
+        'scaler_path': scaler_path
+    }
+    
+    metadata_path = os.path.join(save_dir, f"metadata_fold_{fold}.pkl")
+    with open(metadata_path, 'wb') as f:
+        pickle.dump(metadata, f)
+    
+    return metadata
+
+def load_model_checkpoint(model, fold, save_dir="cv_models"):
+    """모델과 스케일러를 로드"""
+    model_path = os.path.join(save_dir, f"model_fold_{fold}.pth")
+    scaler_path = os.path.join(save_dir, f"scaler_fold_{fold}.pkl")
+    
+    # 모델 로드
+    model.load_state_dict(torch.load(model_path, map_location='cpu'))
+    
+    # 스케일러 로드
+    with open(scaler_path, 'rb') as f:
+        scaler = pickle.load(f)
+    
+    return model, scaler
+
+def get_cv_weights(cv_scores):
+    """CV 점수 기반 가중치 계산"""
+    # 소프트맥스 가중치 (점수가 높을수록 가중치 증가)
+    scores = np.array(cv_scores)
+    weights = np.exp(scores - np.max(scores))  # 수치 안정성을 위해 최대값 빼기
+    weights = weights / np.sum(weights)
+    return weights
+
+def ensemble_predict(models, X_test, device, weights=None):
+    """앙상블 예측"""
+    all_logits = []
+    
+    for i, model in enumerate(models):
+        model.eval()
+        with torch.no_grad():
+            X_test_tensor = torch.tensor(X_test, dtype=torch.float32).to(device)
+            logits = model(X_test_tensor, None, None, None)
+            all_logits.append(logits.cpu().numpy())
+    
+    # 가중 평균
+    if weights is not None:
+        weighted_logits = np.average(all_logits, axis=0, weights=weights)
+    else:
+        weighted_logits = np.mean(all_logits, axis=0)
+    
+    # 최종 예측
+    predictions = np.argmax(weighted_logits, axis=1)
+    probabilities = F.softmax(torch.tensor(weighted_logits), dim=1).numpy()
+    
+    return predictions, probabilities, weighted_logits
+
+def run_cv_ensemble(X_train, y_train, X_test, test_ids, config, args):
+    """CV 앙상블 실행"""
+    print("=" * 60)
+    print("CV 앙상블 학습 시작")
+    print(f"Fold 수: {config.n_folds}")
+    print("=" * 60)
+    
+    # K-Fold 설정
+    skf = StratifiedKFold(n_splits=config.n_folds, shuffle=True, random_state=42)
+    
+    cv_scores = []
+    models = []
+    scalers = []
+    
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X_train, y_train)):
+        print(f"\nFold {fold + 1}/{config.n_folds} 학습 중...")
+        print("-" * 40)
+        
+        # 폴드별 데이터 분할
+        X_fold_train = X_train[train_idx]
+        y_fold_train = y_train[train_idx]
+        X_fold_val = X_train[val_idx]
+        y_fold_val = y_train[val_idx]
+        
+        # 정규화 적용
+        X_fold_train_scaled, X_fold_val_scaled, X_test_scaled, scaler = fft_friendly_scaling(
+            X_fold_train, X_fold_val, X_test, method=args.scaling, scope=args.scaling_scope
+        )
+        
+        # 트레이너 초기화
+        fold_config = iTransformerConfig()
+        fold_config.__dict__.update(config.__dict__)  # 설정 복사
+        fold_config.use_wandb = False  # CV 중에는 Wandb 비활성화
+        
+        trainer = iTransformerTrainer(fold_config)
+        
+        # 데이터 준비
+        train_loader, val_loader, test_loader = trainer.prepare_data(
+            X_fold_train_scaled, y_fold_train, X_fold_val_scaled, y_fold_val, X_test_scaled
+        )
+        
+        # 모델 빌드
+        trainer.build_model()
+        
+        # 학습
+        print(f"Fold {fold + 1} 학습 시작...")
+        training_time = trainer.train(train_loader, val_loader)
+        
+        # 검증
+        val_loss, val_acc, val_macro_f1 = trainer.validate(val_loader)
+        cv_scores.append(val_macro_f1)
+        
+        print(f"Fold {fold + 1} 완료:")
+        print(f"  Val Macro F1: {val_macro_f1:.4f}")
+        print(f"  학습 시간: {training_time:.2f}s")
+        
+        # 모델 저장
+        save_model_checkpoint(trainer.model, scaler, fold, val_macro_f1, config.cv_save_dir)
+        models.append(trainer.model)
+        scalers.append(scaler)
+    
+    # CV 결과 요약
+    print("\n" + "=" * 60)
+    print("CV 결과 요약")
+    print("=" * 60)
+    print(f"CV 점수: {cv_scores}")
+    print(f"평균 CV 점수: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}")
+    print(f"최고 CV 점수: {np.max(cv_scores):.4f}")
+    print(f"최저 CV 점수: {np.min(cv_scores):.4f}")
+    
+    # 가중치 계산
+    cv_weights = get_cv_weights(cv_scores)
+    print(f"CV 가중치: {cv_weights}")
+    
+    # 앙상블 예측
+    print("\n앙상블 예측 생성 중...")
+    X_test_ts = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+    predictions, probabilities, logits = ensemble_predict(models, X_test_ts, trainer.device, cv_weights)
+    
+    # Submission 파일 생성
+    submission_df = pd.DataFrame({
+        'ID': test_ids,
+        'target': predictions
+    })
+    
+    submission_path = f"itransformer_cv_ensemble_submission.csv"
+    submission_df.to_csv(submission_path, index=False)
+    print(f"Submission 파일 저장: {submission_path}")
+    
+    # 상세 결과 저장
+    results_df = pd.DataFrame({
+        'ID': test_ids,
+        'target': predictions,
+        'prob_0': probabilities[:, 0],
+        'prob_1': probabilities[:, 1],
+        'prob_2': probabilities[:, 2],
+        'prob_3': probabilities[:, 3],
+        'prob_4': probabilities[:, 4],
+        'prob_5': probabilities[:, 5],
+        'prob_6': probabilities[:, 6],
+        'prob_7': probabilities[:, 7],
+        'prob_8': probabilities[:, 8],
+        'prob_9': probabilities[:, 9],
+        'prob_10': probabilities[:, 10],
+        'prob_11': probabilities[:, 11],
+        'prob_12': probabilities[:, 12],
+        'prob_13': probabilities[:, 13],
+        'prob_14': probabilities[:, 14],
+        'prob_15': probabilities[:, 15],
+        'prob_16': probabilities[:, 16],
+        'prob_17': probabilities[:, 17],
+        'prob_18': probabilities[:, 18],
+        'prob_19': probabilities[:, 19],
+        'prob_20': probabilities[:, 20]
+    })
+    
+    detailed_path = f"itransformer_cv_ensemble_detailed.csv"
+    results_df.to_csv(detailed_path, index=False)
+    print(f"상세 결과 파일 저장: {detailed_path}")
+    
+    return submission_path, cv_scores, cv_weights
+
 class iTransformerConfig:
     """iTransformer 설정 클래스"""
     def __init__(self):
@@ -294,6 +491,12 @@ class iTransformerConfig:
         # 문제 클래스 설정 (0, 9, 15)
         self.problem_classes = [0, 9, 15]
         self.class_weights = None  # 나중에 계산됨
+        
+        # CV 앙상블 설정
+        self.use_cv = False
+        self.n_folds = 5
+        self.cv_save_dir = "cv_models"
+        self.cv_scores = []
         
         # Wandb 설정
         self.use_wandb = True
@@ -1011,6 +1214,14 @@ def main():
     parser.add_argument('--mixup_alpha', type=float, default=0.2,
                        help='TSMixup 알파 (default: 0.2)')
     
+    # CV 앙상블 설정
+    parser.add_argument('--use_cv', action='store_true', default=False,
+                       help='CV 앙상블 사용 (default: False)')
+    parser.add_argument('--n_folds', type=int, default=5,
+                       help='CV 폴드 수 (default: 5)')
+    parser.add_argument('--cv_save_dir', type=str, default='cv_models',
+                       help='CV 모델 저장 디렉토리 (default: cv_models)')
+    
     args = parser.parse_args()
     
     print("iTransformer 분류 모델 학습 시작")
@@ -1065,6 +1276,23 @@ def main():
     config.jitter_sigma = args.jitter_sigma
     config.mixup_alpha = args.mixup_alpha
     
+    # CV 앙상블 설정
+    config.use_cv = args.use_cv
+    config.n_folds = args.n_folds
+    config.cv_save_dir = args.cv_save_dir
+    
+    # CV 앙상블 실행
+    if config.use_cv:
+        submission_path, cv_scores, cv_weights = run_cv_ensemble(
+            X_train, y_train, X_test, test_ids, config, args
+        )
+        print(f"\nCV 앙상블 완료!")
+        print(f"Submission 파일: {submission_path}")
+        print(f"CV 점수: {cv_scores}")
+        print(f"평균 CV 점수: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}")
+        return
+    
+    # 일반 학습 (CV 사용하지 않는 경우)
     trainer = iTransformerTrainer(config)
     
     # 데이터 준비 (시계열 변환 후 설정 업데이트)
