@@ -1,0 +1,1 @@
+{"learning_rate":3.814697265625e-09,"_step":19,"epoch_time":45.38587927818298,"epoch":20,"train_loss":0.4077272684149006,"val_accuracy":0.763770454021664,"_timestamp":1.7583171115239065e+09,"val_macro_f1":0.7635388129864047,"_runtime":924,"_wandb":{"runtime":924},"val_loss":0.6326764817623531}

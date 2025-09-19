@@ -1,0 +1,1 @@
+{"val_macro_f1":0.7075176415468898,"val_loss":0.7907706889159539,"_timestamp":1.7583161569633243e+09,"_step":0,"_wandb":{"runtime":52},"val_accuracy":0.7130675270799723,"_runtime":52,"epoch":1,"learning_rate":0.001,"train_loss":1.31072702894316,"epoch_time":51.34266519546509}

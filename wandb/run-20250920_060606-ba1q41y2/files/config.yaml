@@ -1,0 +1,85 @@
+_wandb:
+    value:
+        cli_version: 0.22.0
+        e:
+            gqoitu2qqdi57en73bxkun9xqzva15d3:
+                codePath: timesnet_classification.py
+                codePathLocal: timesnet_classification.py
+                cpu_count: 20
+                cpu_count_logical: 28
+                cudaVersion: "12.9"
+                disk:
+                    /:
+                        total: "1999283154944"
+                        used: "1566311862272"
+                email: npjws3690@gmail.com
+                executable: C:\Users\user\Documents\dacon\smart\.venv\Scripts\python.exe
+                gpu: NVIDIA GeForce RTX 4060 Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 3072
+                      memoryTotal: "8585740288"
+                      name: NVIDIA GeForce RTX 4060 Laptop GPU
+                      uuid: GPU-5d67b8f7-2277-8e48-3296-566e02691f6b
+                host: maison
+                memory:
+                    total: "68408893440"
+                os: Windows-11-10.0.26100-SP0
+                program: C:\Users\user\Documents\dacon\smart\timesnet_classification.py
+                python: CPython 3.12.9
+                root: C:\Users\user\Documents\dacon\smart
+                startedAt: "2025-09-19T21:06:06.760281Z"
+                writerId: gqoitu2qqdi57en73bxkun9xqzva15d3
+        m: []
+        python_version: 3.12.9
+        t:
+            "1":
+                - 1
+                - 5
+                - 53
+            "2":
+                - 1
+                - 5
+                - 53
+            "3":
+                - 13
+                - 16
+            "4": 3.12.9
+            "5": 0.22.0
+            "8":
+                - 3
+            "12": 0.22.0
+            "13": windows-amd64
+batch_size:
+    value: 64
+d_ff:
+    value: 128
+d_model:
+    value: 64
+device:
+    value: cuda
+dropout:
+    value: 0.1
+e_layers:
+    value: 2
+enc_in:
+    value: 1
+learning_rate:
+    value: 0.001
+model:
+    value: TimesNet
+num_class:
+    value: 21
+num_kernels:
+    value: 6
+patience:
+    value: 10
+seq_len:
+    value: 52
+task:
+    value: classification
+top_k:
+    value: 5
+train_epochs:
+    value: 50
