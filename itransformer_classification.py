@@ -94,6 +94,7 @@ class PairwiseMarginLoss(nn.Module):
         # targets: [batch_size]
         
         loss = 0
+        valid_pairs = 0
         for class_a, class_b in self.difficult_pairs:
             mask_a = (targets == class_a)
             mask_b = (targets == class_b)
@@ -109,8 +110,12 @@ class PairwiseMarginLoss(nn.Module):
                 
                 # Margin loss: same class should be similar, different classes should be dissimilar
                 loss += F.relu(self.margin - sim_aa.mean()) + F.relu(sim_ab.mean() + self.margin)
+                valid_pairs += 1
         
-        return loss / len(self.difficult_pairs)
+        if valid_pairs > 0:
+            return loss / valid_pairs
+        else:
+            return torch.tensor(0.0, device=features.device, requires_grad=True)
 
 class SupConLoss(nn.Module):
     """Supervised Contrastive Loss"""
@@ -660,7 +665,7 @@ class iTransformerTrainer:
                 features = outputs  # 또는 별도 특징 추출
                 margin_loss = self.margin_loss(features, batch_y)
                 loss += self.config.margin_weight * margin_loss
-                total_margin_loss += margin_loss.item()
+                total_margin_loss += margin_loss.item() if hasattr(margin_loss, 'item') else margin_loss
             
             loss.backward()
             self.optimizer.step()
@@ -990,8 +995,8 @@ def main():
                        help='학습률 스케줄러 선택 (default: cosine)')
     
     # 모델 하이퍼파라미터
-    parser.add_argument('--e_layers', type=int, default=2,
-                       help='인코더 레이어 수 (default: 2)')
+    parser.add_argument('--e_layers', type=int, default=4,
+                       help='인코더 레이어 수 (default: 4)')
     parser.add_argument('--d_model', type=int, default=64,
                        help='모델 차원 (default: 64)')
     parser.add_argument('--d_ff', type=int, default=128,
