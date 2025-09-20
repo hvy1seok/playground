@@ -950,19 +950,42 @@ class iTransformerTrainer:
     
     def init_wandb(self):
         """Wandb 초기화"""
-        run_name = f"itransformer_{int(time.time())}"
-        self.wandb_run = wandb.init(
-            project=self.config.wandb_project,
-            entity=self.config.wandb_entity,
-            name=run_name,
-            config=vars(self.config)
-        )
-        print(f"Wandb 초기화 완료: {self.wandb_run.url}")
+        try:
+            run_name = f"itransformer_{int(time.time())}"
+            print(f"Wandb 초기화 시도 중...")
+            print(f"  프로젝트: {self.config.wandb_project}")
+            print(f"  엔티티: {self.config.wandb_entity}")
+            print(f"  실행명: {run_name}")
+            
+            # Wandb API 키 확인
+            if not wandb.api.api_key:
+                print("⚠️  Wandb API 키가 없습니다. 'wandb login' 명령어를 실행하세요.")
+                raise Exception("Wandb API 키 없음")
+            
+            self.wandb_run = wandb.init(
+                project=self.config.wandb_project,
+                entity=self.config.wandb_entity,
+                name=run_name,
+                config=vars(self.config),
+                reinit=True,  # 기존 run이 있으면 재초기화
+                mode="online"  # 명시적으로 online 모드 설정
+            )
+            print(f"✅ Wandb 초기화 완료: {self.wandb_run.url}")
+            
+        except Exception as e:
+            print(f"❌ Wandb 초기화 실패: {e}")
+            print("Wandb 로깅을 비활성화합니다.")
+            self.wandb_run = None
+            self.config.use_wandb = False
     
     def log_metrics(self, metrics, step=None):
         """Wandb에 메트릭 로깅"""
         if self.wandb_run:
-            wandb.log(metrics, step=step)
+            try:
+                wandb.log(metrics, step=step)
+            except Exception as e:
+                print(f"Wandb 로깅 실패: {e}")
+                print(f"로깅하려던 메트릭: {metrics}")
     
     def log_confusion_matrix(self, y_true, y_pred, class_names=None):
         """혼동 행렬 로깅"""
@@ -980,28 +1003,37 @@ class iTransformerTrainer:
         plt.ylabel('Actual')
         
         if self.wandb_run:
-            wandb.log({"confusion_matrix": wandb.Image(plt)})
+            try:
+                wandb.log({"confusion_matrix": wandb.Image(plt)})
+            except Exception as e:
+                print(f"Confusion Matrix 로깅 실패: {e}")
         plt.close()
     
     def log_predictions_table(self, test_ids, predictions, probabilities=None):
         """예측 결과 테이블 로깅"""
         if self.wandb_run:
-            data = {'ID': test_ids, 'Prediction': predictions}
-            if probabilities is not None:
-                for i in range(probabilities.shape[1]):
-                    data[f'Class_{i}_Prob'] = probabilities[:, i]
-            
-            df = pd.DataFrame(data)
-            table = wandb.Table(dataframe=df)
-            wandb.log({"predictions_table": table})
+            try:
+                data = {'ID': test_ids, 'Prediction': predictions}
+                if probabilities is not None:
+                    for i in range(probabilities.shape[1]):
+                        data[f'Class_{i}_Prob'] = probabilities[:, i]
+                
+                df = pd.DataFrame(data)
+                table = wandb.Table(dataframe=df)
+                wandb.log({"predictions_table": table})
+            except Exception as e:
+                print(f"Predictions Table 로깅 실패: {e}")
     
     def upload_csv(self, csv_path, artifact_name="submission"):
         """CSV 파일을 Wandb에 업로드"""
         if self.wandb_run:
-            artifact = wandb.Artifact(artifact_name, type="dataset")
-            artifact.add_file(csv_path)
-            self.wandb_run.log_artifact(artifact)
-            print(f"CSV 파일이 Wandb에 업로드되었습니다: {artifact_name}")
+            try:
+                artifact = wandb.Artifact(artifact_name, type="dataset")
+                artifact.add_file(csv_path)
+                self.wandb_run.log_artifact(artifact)
+                print(f"CSV 파일이 Wandb에 업로드되었습니다: {artifact_name}")
+            except Exception as e:
+                print(f"CSV 업로드 실패: {e}")
     
     def create_time_series_data(self, X):
         """데이터를 시계열 형태로 변환"""
