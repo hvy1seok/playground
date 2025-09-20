@@ -5,6 +5,7 @@ from math import sqrt
 from utils.masking import TriangularCausalMask, ProbMask
 from reformer_pytorch import LSHSelfAttention
 from einops import rearrange, repeat
+import torch.nn.functional as F
 
 
 class DSAttention(nn.Module):
@@ -59,6 +60,43 @@ class FullAttention(nn.Module):
         scale = self.scale or 1. / sqrt(E)
 
         scores = torch.einsum("blhe,bshe->bhls", queries, keys)
+
+        if self.mask_flag:
+            if attn_mask is None:
+                attn_mask = TriangularCausalMask(B, L, device=queries.device)
+
+            scores.masked_fill_(attn_mask.mask, -np.inf)
+
+        A = self.dropout(torch.softmax(scale * scores, dim=-1))
+        V = torch.einsum("bhls,bshd->blhd", A, values)
+
+        if self.output_attention:
+            return V.contiguous(), A
+        else:
+            return V.contiguous(), None
+
+
+class CosineAttention(nn.Module):
+    """Cosine Attention: normalize(Q)·normalize(K)^T 사용"""
+    def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False):
+        super(CosineAttention, self).__init__()
+        self.scale = scale
+        self.mask_flag = mask_flag
+        self.output_attention = output_attention
+        self.dropout = nn.Dropout(attention_dropout)
+
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
+        B, L, H, E = queries.shape
+        _, S, _, D = values.shape
+        scale = self.scale or 1.0  # Cosine attention에서는 스케일링을 1.0으로 설정
+
+        # Cosine similarity: normalize(Q)·normalize(K)^T
+        # queries와 keys를 L2 정규화
+        queries_norm = F.normalize(queries, p=2, dim=-1)  # B, L, H, E
+        keys_norm = F.normalize(keys, p=2, dim=-1)        # B, S, H, E
+        
+        # Cosine similarity 계산
+        scores = torch.einsum("blhe,bshe->bhls", queries_norm, keys_norm)
 
         if self.mask_flag:
             if attn_mask is None:

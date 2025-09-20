@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
+import math
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
@@ -240,6 +241,62 @@ class TSMixup:
             mixed_y = y1  # Keep original label for cutmix
         
         return mixed_x, mixed_y
+
+# Cosine Attention 구현
+class CosineAttention(nn.Module):
+    """Cosine Attention: normalize(Q)·normalize(K)^T 사용"""
+    def __init__(self, d_model, n_heads, dropout=0.1):
+        super(CosineAttention, self).__init__()
+        assert d_model % n_heads == 0
+        
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
+        
+        self.w_q = nn.Linear(d_model, d_model, bias=False)
+        self.w_k = nn.Linear(d_model, d_model, bias=False)
+        self.w_v = nn.Linear(d_model, d_model, bias=False)
+        self.w_o = nn.Linear(d_model, d_model)
+        
+        self.dropout = nn.Dropout(dropout)
+        self.scale = 1.0 / math.sqrt(self.d_k)  # 스케일링 팩터
+        
+    def forward(self, query, key, value, mask=None):
+        batch_size = query.size(0)
+        seq_len = query.size(1)
+        
+        # 1. Linear projections
+        Q = self.w_q(query).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
+        K = self.w_k(key).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
+        V = self.w_v(value).view(batch_size, seq_len, self.n_heads, self.d_k).transpose(1, 2)
+        
+        # 2. Cosine similarity: normalize(Q)·normalize(K)^T
+        Q_norm = F.normalize(Q, p=2, dim=-1)  # L2 normalization
+        K_norm = F.normalize(K, p=2, dim=-1)  # L2 normalization
+        
+        # 3. Cosine similarity matrix
+        scores = torch.matmul(Q_norm, K_norm.transpose(-2, -1))
+        
+        # 4. Apply mask if provided
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, -1e9)
+        
+        # 5. Softmax
+        attention_weights = F.softmax(scores, dim=-1)
+        attention_weights = self.dropout(attention_weights)
+        
+        # 6. Apply attention to values
+        context = torch.matmul(attention_weights, V)
+        
+        # 7. Concatenate heads
+        context = context.transpose(1, 2).contiguous().view(
+            batch_size, seq_len, self.d_model
+        )
+        
+        # 8. Final linear projection
+        output = self.w_o(context)
+        
+        return output, attention_weights
 
 # CV 앙상블 관련 함수들
 def save_model_checkpoint(model, scaler, fold, cv_score, save_dir="cv_models"):
@@ -497,6 +554,9 @@ class iTransformerConfig:
         self.n_folds = 5
         self.cv_save_dir = "cv_models"
         self.cv_scores = []
+        
+        # Attention 메커니즘 설정
+        self.use_cosine_attention = False
         
         # Wandb 설정
         self.use_wandb = True
@@ -1222,12 +1282,17 @@ def main():
     parser.add_argument('--cv_save_dir', type=str, default='cv_models',
                        help='CV 모델 저장 디렉토리 (default: cv_models)')
     
+    # Attention 메커니즘 설정
+    parser.add_argument('--use_cosine_attention', action='store_true', default=False,
+                       help='Cosine Attention 사용 (default: False)')
+    
     args = parser.parse_args()
     
     print("iTransformer 분류 모델 학습 시작")
     print("=" * 50)
     print(f"정규화 방법: {args.scaling}")
     print(f"스케일링 범위: {args.scaling_scope}")
+    print(f"Attention 메커니즘: {'Cosine Attention' if args.use_cosine_attention else 'Full Attention'}")
     print(f"스케줄러: {args.scheduler}")
     print(f"모델 설정: e_layers={args.e_layers}, d_model={args.d_model}, d_ff={args.d_ff}")
     print(f"학습 설정: lr={args.learning_rate}, batch_size={args.batch_size}, epochs={args.epochs}")
@@ -1280,6 +1345,9 @@ def main():
     config.use_cv = args.use_cv
     config.n_folds = args.n_folds
     config.cv_save_dir = args.cv_save_dir
+    
+    # Attention 메커니즘 설정
+    config.use_cosine_attention = args.use_cosine_attention
     
     # CV 앙상블 실행
     if config.use_cv:

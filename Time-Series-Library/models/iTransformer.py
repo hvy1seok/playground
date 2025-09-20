@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers.Transformer_EncDec import Encoder, EncoderLayer
-from layers.SelfAttention_Family import FullAttention, AttentionLayer
+from layers.SelfAttention_Family import FullAttention, CosineAttention, AttentionLayer
 from layers.Embed import DataEmbedding_inverted
 import numpy as np
 
@@ -20,13 +20,20 @@ class Model(nn.Module):
         # Embedding
         self.enc_embedding = DataEmbedding_inverted(configs.seq_len, configs.d_model, configs.embed, configs.freq,
                                                     configs.dropout)
+        # Attention 메커니즘 선택
+        if hasattr(configs, 'use_cosine_attention') and configs.use_cosine_attention:
+            attention_mechanism = CosineAttention(False, configs.factor, attention_dropout=configs.dropout,
+                                                output_attention=False)
+        else:
+            attention_mechanism = FullAttention(False, configs.factor, attention_dropout=configs.dropout,
+                                              output_attention=False)
+        
         # Encoder
         self.encoder = Encoder(
             [
                 EncoderLayer(
                     AttentionLayer(
-                        FullAttention(False, configs.factor, attention_dropout=configs.dropout,
-                                      output_attention=False), configs.d_model, configs.n_heads),
+                        attention_mechanism, configs.d_model, configs.n_heads),
                     configs.d_model,
                     configs.d_ff,
                     dropout=configs.dropout,
