@@ -391,10 +391,22 @@ class SpecialistEnsemble:
         specialist_config = iTransformerConfig()
         specialist_config.__dict__.update(self.config.__dict__)  # 기본 설정 복사
         specialist_config.num_class = 2  # Binary classification
-        specialist_config.use_wandb = False  # Specialist는 Wandb 비활성화
+        specialist_config.use_wandb = True  # Specialist도 Wandb 활성화
+        specialist_config.wandb_project = f"{self.config.wandb_project}-specialist-class-{target_class}"  # 클래스별 프로젝트
         
         # iTransformer 모델 생성
         model = iTransformer(specialist_config).to(self.device)
+        
+        # Wandb 초기화 (specialist용)
+        if specialist_config.use_wandb:
+            run_name = f"specialist_class_{target_class}_{int(time.time())}"
+            self.wandb_run = wandb.init(
+                project=specialist_config.wandb_project,
+                entity=specialist_config.wandb_entity,
+                name=run_name,
+                config=vars(specialist_config)
+            )
+            print(f"Specialist Wandb 초기화 완료: {self.wandb_run.url}")
         
         # 데이터 로더 (시계열 형태로 변환)
         X_train_ts = np.reshape(X_train_bin, (X_train_bin.shape[0], X_train_bin.shape[1], 1))
@@ -477,12 +489,27 @@ class SpecialistEnsemble:
                 if patience_counter >= patience:
                     break
             
+            # Wandb 로깅
+            if hasattr(self, 'wandb_run') and self.wandb_run:
+                wandb.log({
+                    'epoch': epoch,
+                    'train_loss': train_loss,
+                    'val_loss': val_loss,
+                    'train_accuracy': train_acc,
+                    'val_accuracy': val_acc,
+                    'learning_rate': optimizer.param_groups[0]['lr']
+                })
+            
             if epoch % 5 == 0:
                 print(f"  Epoch {epoch}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
         
         # 최고 모델 로드
         model.load_state_dict(torch.load(f'specialist_class_{target_class}.pth'))
         self.specialists[target_class] = model
+        
+        # Wandb run 종료
+        if hasattr(self, 'wandb_run') and self.wandb_run:
+            wandb.finish()
         
         print(f"Specialist Class {target_class} 학습 완료 (Val Loss: {best_val_loss:.4f}, Val Acc: {val_acc:.2f}%)")
         return model
@@ -627,7 +654,8 @@ def run_cv_ensemble(X_train, y_train, X_test, test_ids, config, args):
         # 트레이너 초기화
         fold_config = iTransformerConfig()
         fold_config.__dict__.update(config.__dict__)  # 설정 복사
-        fold_config.use_wandb = False  # CV 중에는 Wandb 비활성화
+        fold_config.use_wandb = True  # CV에서도 Wandb 활성화
+        fold_config.wandb_project = f"{config.wandb_project}-cv-fold-{fold+1}"  # 폴드별 프로젝트
         
         trainer = iTransformerTrainer(fold_config)
         
@@ -641,6 +669,7 @@ def run_cv_ensemble(X_train, y_train, X_test, test_ids, config, args):
         
         # 학습
         print(f"Fold {fold + 1} 학습 시작...")
+        print(f"Wandb 프로젝트: {fold_config.wandb_project}")
         training_time = trainer.train(train_loader, val_loader)
         
         # 검증
@@ -655,6 +684,10 @@ def run_cv_ensemble(X_train, y_train, X_test, test_ids, config, args):
         save_model_checkpoint(trainer.model, scaler, fold, val_macro_f1, config.cv_save_dir)
         models.append(trainer.model)
         scalers.append(scaler)
+        
+        # Wandb run 종료
+        if trainer.wandb_run:
+            wandb.finish()
     
     # CV 결과 요약
     print("\n" + "=" * 60)
