@@ -748,6 +748,50 @@ def run_cv_ensemble(X_train, y_train, X_test, test_ids, config, args):
     results_df.to_csv(detailed_path, index=False)
     print(f"상세 결과 파일 저장: {detailed_path}")
     
+    # 최종 CV 앙상블 결과를 Wandb에 로깅
+    if config.use_wandb:
+        print("\n최종 CV 앙상블 결과를 Wandb에 로깅 중...")
+        try:
+            # 최종 CV 앙상블 전용 Wandb run 생성
+            final_run = wandb.init(
+                project=f"{config.wandb_project}-final-ensemble",
+                name=f"cv_ensemble_final_{int(time.time())}",
+                config={
+                    "ensemble_type": "cv_ensemble",
+                    "cv_scores": cv_scores,
+                    "mean_cv_score": float(np.mean(cv_scores)),
+                    "std_cv_score": float(np.std(cv_scores)),
+                    "cv_weights": cv_weights.tolist(),
+                    "n_folds": config.n_folds,
+                    "submission_file": submission_path
+                }
+            )
+            
+            # 최종 결과 메트릭 로깅
+            wandb.log({
+                "final_mean_cv_score": float(np.mean(cv_scores)),
+                "final_std_cv_score": float(np.std(cv_scores)),
+                "final_max_cv_score": float(np.max(cv_scores)),
+                "final_min_cv_score": float(np.min(cv_scores)),
+                "n_folds": config.n_folds
+            })
+            
+            # Submission 파일 업로드
+            artifact = wandb.Artifact("cv_ensemble_submission", type="dataset")
+            artifact.add_file(submission_path)
+            final_run.log_artifact(artifact)
+            
+            # 상세 결과 파일도 업로드
+            detailed_artifact = wandb.Artifact("cv_ensemble_detailed", type="dataset")
+            detailed_artifact.add_file(detailed_path)
+            final_run.log_artifact(detailed_artifact)
+            
+            print(f"✅ 최종 CV 앙상블 결과 Wandb 로깅 완료: {final_run.url}")
+            wandb.finish()
+            
+        except Exception as e:
+            print(f"❌ 최종 CV 앙상블 Wandb 로깅 실패: {e}")
+    
     return submission_path, cv_scores, cv_weights
 
 def run_specialist_ensemble(X_train, y_train, X_val, y_val, X_test, test_ids, config, args):
@@ -839,6 +883,51 @@ def run_specialist_ensemble(X_train, y_train, X_val, y_val, X_test, test_ids, co
     print(f"Specialist Classes: {config.specialist_classes}")
     print(f"Alpha: {config.specialist_alpha}")
     print(f"Submission 파일: {submission_path}")
+    
+    # 6. 최종 앙상블 결과를 Wandb에 로깅
+    if config.use_wandb:
+        print("\n최종 앙상블 결과를 Wandb에 로깅 중...")
+        try:
+            # 최종 앙상블 전용 Wandb run 생성
+            final_run = wandb.init(
+                project=f"{config.wandb_project}-final-ensemble",
+                name=f"specialist_ensemble_final_{int(time.time())}",
+                config={
+                    "ensemble_type": "specialist_ensemble",
+                    "cv_scores": cv_scores,
+                    "mean_cv_score": float(np.mean(cv_scores)),
+                    "std_cv_score": float(np.std(cv_scores)),
+                    "specialist_classes": config.specialist_classes,
+                    "alpha": config.specialist_alpha,
+                    "submission_file": submission_path
+                }
+            )
+            
+            # 최종 결과 메트릭 로깅
+            wandb.log({
+                "final_mean_cv_score": float(np.mean(cv_scores)),
+                "final_std_cv_score": float(np.std(cv_scores)),
+                "final_max_cv_score": float(np.max(cv_scores)),
+                "final_min_cv_score": float(np.min(cv_scores)),
+                "specialist_alpha": config.specialist_alpha,
+                "num_specialist_classes": len(config.specialist_classes)
+            })
+            
+            # Submission 파일 업로드
+            artifact = wandb.Artifact("specialist_ensemble_submission", type="dataset")
+            artifact.add_file(submission_path)
+            final_run.log_artifact(artifact)
+            
+            # 상세 결과 파일도 업로드
+            detailed_artifact = wandb.Artifact("specialist_ensemble_detailed", type="dataset")
+            detailed_artifact.add_file(detailed_path)
+            final_run.log_artifact(detailed_artifact)
+            
+            print(f"✅ 최종 앙상블 결과 Wandb 로깅 완료: {final_run.url}")
+            wandb.finish()
+            
+        except Exception as e:
+            print(f"❌ 최종 앙상블 Wandb 로깅 실패: {e}")
     
     return submission_path, cv_scores, corrected_probs
 
@@ -1830,8 +1919,41 @@ def main():
     print(f"Validation Macro F1: {eval_results['macro_f1']:.4f}")
     print(f"학습 시간: {training_time:.2f}초")
     
+    # 최종 일반 학습 결과를 Wandb에 로깅
     if config.use_wandb:
-        wandb.finish()
+        print("\n최종 일반 학습 결과를 Wandb에 로깅 중...")
+        try:
+            # 최종 일반 학습 전용 Wandb run 생성
+            final_run = wandb.init(
+                project=f"{config.wandb_project}-final-ensemble",
+                name=f"single_model_final_{int(time.time())}",
+                config={
+                    "ensemble_type": "single_model",
+                    "final_val_accuracy": float(val_acc),
+                    "final_val_macro_f1": float(val_macro_f1),
+                    "training_time": training_time,
+                    "submission_file": "itransformer_submission.csv"
+                }
+            )
+            
+            # 최종 결과 메트릭 로깅
+            wandb.log({
+                "final_val_accuracy": float(val_acc),
+                "final_val_macro_f1": float(val_macro_f1),
+                "training_time": training_time
+            })
+            
+            # Submission 파일 업로드
+            artifact = wandb.Artifact("single_model_submission", type="dataset")
+            artifact.add_file("itransformer_submission.csv")
+            final_run.log_artifact(artifact)
+            
+            print(f"✅ 최종 일반 학습 결과 Wandb 로깅 완료: {final_run.url}")
+            wandb.finish()
+            
+        except Exception as e:
+            print(f"❌ 최종 일반 학습 Wandb 로깅 실패: {e}")
+            wandb.finish()
 
 if __name__ == "__main__":
     main()
