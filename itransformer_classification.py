@@ -298,6 +298,230 @@ class CosineAttention(nn.Module):
         
         return output, attention_weights
 
+# Specialist 앙상블을 위한 Binary 분류기들
+class ResNet1D(nn.Module):
+    """1D ResNet for binary classification"""
+    def __init__(self, input_dim, hidden_dim=64, num_blocks=2, dropout=0.1):
+        super(ResNet1D, self).__init__()
+        
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        
+        # ResNet blocks
+        self.blocks = nn.ModuleList()
+        for _ in range(num_blocks):
+            self.blocks.append(nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+            ))
+        
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+        self.classifier = nn.Linear(hidden_dim, 1)
+        
+    def forward(self, x):
+        # x: (batch_size, seq_len, features) -> (batch_size, features)
+        x = x.mean(dim=1)  # Global average pooling
+        
+        x = self.input_proj(x)
+        
+        # ResNet blocks with residual connections
+        for block in self.blocks:
+            residual = x
+            x = block(x)
+            x = self.activation(x + residual)
+            x = self.dropout(x)
+        
+        x = self.classifier(x)
+        return torch.sigmoid(x)
+
+class MLPBinary(nn.Module):
+    """MLP for binary classification"""
+    def __init__(self, input_dim, hidden_dims=[128, 64], dropout=0.1):
+        super(MLPBinary, self).__init__()
+        
+        layers = []
+        prev_dim = input_dim
+        
+        for hidden_dim in hidden_dims:
+            layers.extend([
+                nn.Linear(prev_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout)
+            ])
+            prev_dim = hidden_dim
+        
+        layers.append(nn.Linear(prev_dim, 1))
+        
+        self.network = nn.Sequential(*layers)
+        
+    def forward(self, x):
+        # x: (batch_size, seq_len, features) -> (batch_size, features)
+        x = x.mean(dim=1)  # Global average pooling
+        x = self.network(x)
+        return torch.sigmoid(x)
+
+class SpecialistEnsemble:
+    """Specialist 앙상블 클래스"""
+    def __init__(self, target_classes=[0, 9, 15], alpha=0.3, config=None):
+        self.target_classes = target_classes
+        self.alpha = alpha
+        self.specialists = {}
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.config = config
+        
+    def create_binary_dataset(self, X, y, target_class):
+        """특정 클래스에 대한 binary 데이터셋 생성"""
+        y_binary = (y == target_class).astype(int)
+        return X, y_binary
+    
+    def train_specialist(self, X_train, y_train, X_val, y_val, target_class, epochs=10, lr=0.001):
+        """특정 클래스에 대한 specialist iTransformer 모델 학습"""
+        print(f"Specialist iTransformer 모델 학습 중: Class {target_class}")
+        
+        # Binary 데이터셋 생성
+        X_train_bin, y_train_bin = self.create_binary_dataset(X_train, y_train, target_class)
+        X_val_bin, y_val_bin = self.create_binary_dataset(X_val, y_val, target_class)
+        
+        # iTransformer 모델 생성 (binary classification용)
+        specialist_config = iTransformerConfig()
+        specialist_config.__dict__.update(self.config.__dict__)  # 기본 설정 복사
+        specialist_config.num_class = 2  # Binary classification
+        specialist_config.use_wandb = False  # Specialist는 Wandb 비활성화
+        
+        # iTransformer 모델 생성
+        model = iTransformer(specialist_config).to(self.device)
+        
+        # 데이터 로더 (시계열 형태로 변환)
+        X_train_ts = np.reshape(X_train_bin, (X_train_bin.shape[0], X_train_bin.shape[1], 1))
+        X_val_ts = np.reshape(X_val_bin, (X_val_bin.shape[0], X_val_bin.shape[1], 1))
+        
+        train_loader = DataLoader(
+            TensorDataset(torch.tensor(X_train_ts, dtype=torch.float32), 
+                         torch.tensor(y_train_bin, dtype=torch.long)),
+            batch_size=64, shuffle=True
+        )
+        val_loader = DataLoader(
+            TensorDataset(torch.tensor(X_val_ts, dtype=torch.float32), 
+                         torch.tensor(y_val_bin, dtype=torch.long)),
+            batch_size=256, shuffle=False
+        )
+        
+        # 옵티마이저와 손실함수
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        criterion = nn.CrossEntropyLoss()
+        
+        # 학습
+        best_val_loss = float('inf')
+        patience = 5
+        patience_counter = 0
+        
+        for epoch in range(epochs):
+            # Train
+            model.train()
+            train_loss = 0
+            train_correct = 0
+            train_total = 0
+            
+            for batch_x, batch_y in train_loader:
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
+                
+                optimizer.zero_grad()
+                outputs = model(batch_x, None, None, None)
+                loss = criterion(outputs, batch_y)
+                loss.backward()
+                optimizer.step()
+                
+                train_loss += loss.item()
+                _, predicted = torch.max(outputs.data, 1)
+                train_total += batch_y.size(0)
+                train_correct += (predicted == batch_y).sum().item()
+            
+            # Validation
+            model.eval()
+            val_loss = 0
+            val_correct = 0
+            val_total = 0
+            
+            with torch.no_grad():
+                for batch_x, batch_y in val_loader:
+                    batch_x = batch_x.to(self.device)
+                    batch_y = batch_y.to(self.device)
+                    
+                    outputs = model(batch_x, None, None, None)
+                    loss = criterion(outputs, batch_y)
+                    val_loss += loss.item()
+                    
+                    _, predicted = torch.max(outputs.data, 1)
+                    val_total += batch_y.size(0)
+                    val_correct += (predicted == batch_y).sum().item()
+            
+            train_loss /= len(train_loader)
+            val_loss /= len(val_loader)
+            train_acc = 100 * train_correct / train_total
+            val_acc = 100 * val_correct / val_total
+            
+            # Early stopping
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                # 모델 저장
+                torch.save(model.state_dict(), f'specialist_class_{target_class}.pth')
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    break
+            
+            if epoch % 5 == 0:
+                print(f"  Epoch {epoch}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+        
+        # 최고 모델 로드
+        model.load_state_dict(torch.load(f'specialist_class_{target_class}.pth'))
+        self.specialists[target_class] = model
+        
+        print(f"Specialist Class {target_class} 학습 완료 (Val Loss: {best_val_loss:.4f}, Val Acc: {val_acc:.2f}%)")
+        return model
+    
+    def predict_specialist(self, X, target_class):
+        """특정 클래스에 대한 specialist 예측"""
+        if target_class not in self.specialists:
+            return None
+        
+        model = self.specialists[target_class]
+        model.eval()
+        
+        with torch.no_grad():
+            X_tensor = torch.tensor(X, dtype=torch.float32).to(self.device)
+            outputs = model(X_tensor, None, None, None)
+            # Binary classification이므로 클래스 1 (target class)의 확률을 반환
+            probabilities = F.softmax(outputs, dim=1)[:, 1].cpu().numpy()
+        
+        return probabilities
+    
+    def ensemble_predict(self, main_probs, X_test):
+        """메인 모델과 specialist 모델 앙상블"""
+        corrected_probs = main_probs.copy()
+        
+        for target_class in self.target_classes:
+            if target_class in self.specialists:
+                specialist_probs = self.predict_specialist(X_test, target_class)
+                if specialist_probs is not None:
+                    # 보정: p' = (1-α) * p_main + α * p_special
+                    corrected_probs[:, target_class] = (
+                        (1 - self.alpha) * main_probs[:, target_class] + 
+                        self.alpha * specialist_probs.squeeze()
+                    )
+        
+        # Softmax 정규화
+        corrected_probs = F.softmax(torch.tensor(corrected_probs), dim=1).numpy()
+        
+        return corrected_probs
+
 # CV 앙상블 관련 함수들
 def save_model_checkpoint(model, scaler, fold, cv_score, save_dir="cv_models"):
     """모델과 스케일러를 저장"""
@@ -493,6 +717,98 @@ def run_cv_ensemble(X_train, y_train, X_test, test_ids, config, args):
     
     return submission_path, cv_scores, cv_weights
 
+def run_specialist_ensemble(X_train, y_train, X_val, y_val, X_test, test_ids, config, args):
+    """Specialist 앙상블 실행"""
+    print("=" * 60)
+    print("Specialist 앙상블 학습 시작")
+    print(f"Target Classes: {config.specialist_classes}")
+    print(f"Specialist Model: iTransformer (Binary Classification)")
+    print(f"Alpha: {config.specialist_alpha}")
+    print("=" * 60)
+    
+    # 1. 메인 모델 학습 (CV 앙상블)
+    print("1단계: 메인 모델 학습 중...")
+    main_submission, cv_scores, cv_weights = run_cv_ensemble(
+        X_train, y_train, X_test, test_ids, config, args
+    )
+    
+    # 메인 모델의 확률 예측 로드 (CV 앙상블에서 생성된 상세 결과)
+    detailed_path = f"itransformer_cv_ensemble_detailed.csv"
+    if os.path.exists(detailed_path):
+        detailed_df = pd.read_csv(detailed_path)
+        main_probs = detailed_df[[f'prob_{i}' for i in range(21)]].values
+    else:
+        print("경고: 메인 모델 상세 결과를 찾을 수 없습니다. 기본 확률을 사용합니다.")
+        main_probs = np.ones((len(X_test), 21)) / 21
+    
+    # 2. Specialist 모델들 학습
+    print("\n2단계: Specialist 모델들 학습 중...")
+    specialist_ensemble = SpecialistEnsemble(
+        target_classes=config.specialist_classes,
+        alpha=config.specialist_alpha,
+        config=config
+    )
+    
+    # 정규화 적용 (메인 모델과 동일한 방식)
+    X_train_scaled, X_val_scaled, X_test_scaled, scaler = fft_friendly_scaling(
+        X_train, X_val, X_test, method=args.scaling, scope=args.scaling_scope
+    )
+    
+    # 시계열 형태로 변환
+    X_train_ts = np.reshape(X_train_scaled, (X_train_scaled.shape[0], X_train_scaled.shape[1], 1))
+    X_val_ts = np.reshape(X_val_scaled, (X_val_scaled.shape[0], X_val_scaled.shape[1], 1))
+    X_test_ts = np.reshape(X_test_scaled, (X_test_scaled.shape[0], X_test_scaled.shape[1], 1))
+    
+    # 각 specialist 모델 학습
+    for target_class in config.specialist_classes:
+        specialist_ensemble.train_specialist(
+            X_train_ts, y_train, X_val_ts, y_val, target_class,
+            epochs=config.specialist_epochs, lr=config.specialist_lr
+        )
+    
+    # 3. 앙상블 예측
+    print("\n3단계: 앙상블 예측 생성 중...")
+    corrected_probs = specialist_ensemble.ensemble_predict(main_probs, X_test_ts)
+    
+    # 최종 예측
+    predictions = np.argmax(corrected_probs, axis=1)
+    
+    # 4. 결과 저장
+    print("\n4단계: 결과 저장 중...")
+    
+    # Submission 파일 생성
+    submission_df = pd.DataFrame({
+        'ID': test_ids,
+        'target': predictions
+    })
+    
+    submission_path = f"itransformer_specialist_ensemble_submission.csv"
+    submission_df.to_csv(submission_path, index=False)
+    print(f"Specialist 앙상블 Submission 파일 저장: {submission_path}")
+    
+    # 상세 결과 저장
+    results_df = pd.DataFrame({
+        'ID': test_ids,
+        'target': predictions,
+        **{f'prob_{i}': corrected_probs[:, i] for i in range(21)}
+    })
+    
+    detailed_path = f"itransformer_specialist_ensemble_detailed.csv"
+    results_df.to_csv(detailed_path, index=False)
+    print(f"Specialist 앙상블 상세 결과 파일 저장: {detailed_path}")
+    
+    # 5. 결과 요약
+    print("\n" + "=" * 60)
+    print("Specialist 앙상블 결과 요약")
+    print("=" * 60)
+    print(f"메인 모델 CV 점수: {cv_scores}")
+    print(f"평균 CV 점수: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}")
+    print(f"Specialist Classes: {config.specialist_classes}")
+    print(f"Alpha: {config.specialist_alpha}")
+    print(f"Submission 파일: {submission_path}")
+    
+    return submission_path, cv_scores, corrected_probs
+
 class iTransformerConfig:
     """iTransformer 설정 클래스"""
     def __init__(self):
@@ -557,6 +873,13 @@ class iTransformerConfig:
         
         # Attention 메커니즘 설정
         self.use_cosine_attention = False
+        
+        # Specialist 앙상블 설정
+        self.use_specialist_ensemble = False
+        self.specialist_classes = [0, 9, 15]
+        self.specialist_alpha = 0.3
+        self.specialist_epochs = 10
+        self.specialist_lr = 0.001
         
         # Wandb 설정
         self.use_wandb = True
@@ -1286,6 +1609,18 @@ def main():
     parser.add_argument('--use_cosine_attention', action='store_true', default=False,
                        help='Cosine Attention 사용 (default: False)')
     
+    # Specialist 앙상블 설정
+    parser.add_argument('--use_specialist_ensemble', action='store_true', default=False,
+                       help='Specialist 앙상블 사용 (default: False)')
+    parser.add_argument('--specialist_classes', type=int, nargs='+', default=[0, 9, 15],
+                       help='Specialist 대상 클래스들 (default: [0, 9, 15])')
+    parser.add_argument('--specialist_alpha', type=float, default=0.3,
+                       help='Specialist 가중치 (default: 0.3)')
+    parser.add_argument('--specialist_epochs', type=int, default=10,
+                       help='Specialist 모델 학습 에포크 (default: 10)')
+    parser.add_argument('--specialist_lr', type=float, default=0.001,
+                       help='Specialist 모델 학습률 (default: 0.001)')
+    
     args = parser.parse_args()
     
     print("iTransformer 분류 모델 학습 시작")
@@ -1293,6 +1628,10 @@ def main():
     print(f"정규화 방법: {args.scaling}")
     print(f"스케일링 범위: {args.scaling_scope}")
     print(f"Attention 메커니즘: {'Cosine Attention' if args.use_cosine_attention else 'Full Attention'}")
+    print(f"앙상블 방식: {'Specialist' if args.use_specialist_ensemble else 'CV' if args.use_cv else 'None'}")
+    if args.use_specialist_ensemble:
+        print(f"Specialist Classes: {args.specialist_classes}")
+        print(f"Specialist Alpha: {args.specialist_alpha}")
     print(f"스케줄러: {args.scheduler}")
     print(f"모델 설정: e_layers={args.e_layers}, d_model={args.d_model}, d_ff={args.d_ff}")
     print(f"학습 설정: lr={args.learning_rate}, batch_size={args.batch_size}, epochs={args.epochs}")
@@ -1348,6 +1687,24 @@ def main():
     
     # Attention 메커니즘 설정
     config.use_cosine_attention = args.use_cosine_attention
+    
+    # Specialist 앙상블 설정
+    config.use_specialist_ensemble = args.use_specialist_ensemble
+    config.specialist_classes = args.specialist_classes
+    config.specialist_alpha = args.specialist_alpha
+    config.specialist_epochs = args.specialist_epochs
+    config.specialist_lr = args.specialist_lr
+    
+    # Specialist 앙상블 실행
+    if config.use_specialist_ensemble:
+        submission_path, cv_scores, corrected_probs = run_specialist_ensemble(
+            X_train, y_train, X_val, y_val, X_test, test_ids, config, args
+        )
+        print(f"\nSpecialist 앙상블 완료!")
+        print(f"Submission 파일: {submission_path}")
+        print(f"CV 점수: {cv_scores}")
+        print(f"평균 CV 점수: {np.mean(cv_scores):.4f} ± {np.std(cv_scores):.4f}")
+        return
     
     # CV 앙상블 실행
     if config.use_cv:
