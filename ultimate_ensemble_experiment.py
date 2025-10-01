@@ -10,7 +10,7 @@ import pickle
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import RobustScaler
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import f1_score, confusion_matrix
 from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import CalibratedClassifierCV
@@ -1433,7 +1433,6 @@ def run_ultimate_experiment(args):
     X_test_scaled_full = scaler_final.transform(X_test)
     
     # OVR 모델 학습 (훈련/검증 분리)
-    from sklearn.model_selection import train_test_split
     ovr_models = {}
     
     for c in [0, 9, 15]:
