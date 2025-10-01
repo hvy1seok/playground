@@ -1097,23 +1097,46 @@ def run_ultimate_experiment(args):
     print(f"  - Agreement: 1개")
     print(f"  - 총: {oof_meta_features_extended.shape[1]}개")
     
-    # 메타 모델 학습 (Hold-out train 데이터만 사용)
-    print(f"\n메타 모델 학습 중... (모델: {args.meta_model})")
+    # AutoML 기반 메타 모델 학습
+    print(f"\nAutoML 메타 모델 학습 중...")
     
-    if args.meta_model == 'logistic':
-        meta_model = LogisticRegression(
-            random_state=42,
-            max_iter=1000,
-            solver='lbfgs',
-            multi_class='multinomial',
-            C=1.0,
-            class_weight='balanced'
-        )
-        meta_model.fit(X_meta_train_features, y_meta_train_labels)
-        
-    elif args.meta_model == 'lightgbm':
-        if not LIGHTGBM_AVAILABLE:
-            print("⚠️ LightGBM이 설치되지 않았습니다. Logistic Regression으로 대체합니다.")
+    if args.meta_model == 'automl':
+        try:
+            # MLJAR-Supervised AutoML 라이브러리 시도
+            from supervised.automl import AutoML
+            
+            # Macro-F1 스코어러 정의
+            def macro_f1_scorer(y_true, y_pred):
+                return f1_score(y_true, y_pred, average='macro')
+            
+            # AutoML 설정
+            meta_model = AutoML(
+                mode='Compete',  # 최고 성능 모드
+                total_time_limit=300,  # 5분
+                algorithms=['Random Forest', 'Extra Trees', 'Xgboost', 'LightGBM', 
+                          'CatBoost', 'Neural Network', 'Linear', 'Ensemble'],
+                train_ensemble=True,  # 앙상블 학습
+                stack_models=True,    # 스태킹 활성화
+                eval_metric='f1_macro',  # Macro-F1 평가
+                validation_strategy={
+                    'validation_type': 'split',
+                    'train_ratio': 0.8,
+                    'shuffle': True,
+                    'stratify': True
+                },
+                random_state=42,
+                verbose=1
+            )
+            
+            print("MLJAR AutoML 학습 시작...")
+            meta_model.fit(X_meta_train_features, y_meta_train_labels)
+            print("MLJAR AutoML 학습 완료!")
+            
+            # AutoML 모델 정보 출력
+            print(f"선택된 모델: {meta_model.get_leaderboard()}")
+            
+        except ImportError:
+            print("⚠️ MLJAR-Supervised가 설치되지 않았습니다. Logistic Regression으로 대체합니다.")
             meta_model = LogisticRegression(
                 random_state=42,
                 max_iter=1000,
@@ -1123,94 +1146,133 @@ def run_ultimate_experiment(args):
                 class_weight='balanced'
             )
             meta_model.fit(X_meta_train_features, y_meta_train_labels)
-        else:
-            # LightGBM 파라미터
-            params = {
-                'objective': 'multiclass',
-                'num_class': num_classes,
-                'metric': 'multi_logloss',
-                'boosting_type': 'gbdt',
-                'num_leaves': 31,
-                'learning_rate': 0.05,
-                'feature_fraction': 0.8,
-                'bagging_fraction': 0.8,
-                'bagging_freq': 5,
-                'verbose': -1,
-                'seed': 42,
-                'n_jobs': -1
-            }
-            
-            # 클래스 가중치 계산
-            class_counts = np.bincount(y_meta_train_labels)
-            class_weights = len(y_meta_train_labels) / (num_classes * class_counts)
-            sample_weights = class_weights[y_meta_train_labels]
-            
-            train_data = lgb.Dataset(X_meta_train_features, label=y_meta_train_labels, weight=sample_weights)
-            
-            meta_model = lgb.train(
-                params,
-                train_data,
-                num_boost_round=200,
-                valid_sets=[train_data],
-                callbacks=[lgb.early_stopping(50), lgb.log_evaluation(50)]
-            )
-    
-    elif args.meta_model == 'xgboost':
-        if not XGBOOST_AVAILABLE:
-            print("⚠️ XGBoost가 설치되지 않았습니다. Logistic Regression으로 대체합니다.")
-            meta_model = LogisticRegression(
-                random_state=42,
-                max_iter=1000,
-                solver='lbfgs',
-                multi_class='multinomial',
-                C=1.0,
-                class_weight='balanced'
-            )
-            meta_model.fit(X_meta_train_features, y_meta_train_labels)
-        else:
-            # 클래스 가중치 계산
-            class_counts = np.bincount(y_meta_train_labels)
-            class_weights = len(y_meta_train_labels) / (num_classes * class_counts)
-            sample_weights = class_weights[y_meta_train_labels]
-            
-            dtrain = xgb.DMatrix(X_meta_train_features, label=y_meta_train_labels, weight=sample_weights)
-            
-            params = {
-                'objective': 'multi:softprob',
-                'num_class': num_classes,
-                'eval_metric': 'mlogloss',
-                'max_depth': 5,
-                'learning_rate': 0.05,
-                'subsample': 0.8,
-                'colsample_bytree': 0.8,
-                'seed': 42,
-                'tree_method': 'hist'
-            }
-            
-            meta_model = xgb.train(
-                params,
-                dtrain,
-                num_boost_round=200,
-                evals=[(dtrain, 'train')],
-                early_stopping_rounds=50,
-                verbose_eval=50
-            )
     
     else:
-        raise ValueError(f"Unknown meta_model: {args.meta_model}")
+        # 기존 방식
+        if args.meta_model == 'logistic':
+            meta_model = LogisticRegression(
+                random_state=42,
+                max_iter=1000,
+                solver='lbfgs',
+                multi_class='multinomial',
+                C=1.0,
+                class_weight='balanced'
+            )
+            meta_model.fit(X_meta_train_features, y_meta_train_labels)
+            
+        elif args.meta_model == 'lightgbm':
+            if not LIGHTGBM_AVAILABLE:
+                print("⚠️ LightGBM이 설치되지 않았습니다. Logistic Regression으로 대체합니다.")
+                meta_model = LogisticRegression(
+                    random_state=42,
+                    max_iter=1000,
+                    solver='lbfgs',
+                    multi_class='multinomial',
+                    C=1.0,
+                    class_weight='balanced'
+                )
+                meta_model.fit(X_meta_train_features, y_meta_train_labels)
+            else:
+                # LightGBM 파라미터
+                params = {
+                    'objective': 'multiclass',
+                    'num_class': num_classes,
+                    'metric': 'multi_logloss',
+                    'boosting_type': 'gbdt',
+                    'num_leaves': 31,
+                    'learning_rate': 0.05,
+                    'feature_fraction': 0.8,
+                    'bagging_fraction': 0.8,
+                    'bagging_freq': 5,
+                    'verbose': -1,
+                    'seed': 42,
+                    'n_jobs': -1
+                }
+                
+                # 클래스 가중치 계산
+                class_counts = np.bincount(y_meta_train_labels)
+                class_weights = len(y_meta_train_labels) / (num_classes * class_counts)
+                sample_weights = class_weights[y_meta_train_labels]
+                
+                train_data = lgb.Dataset(X_meta_train_features, label=y_meta_train_labels, weight=sample_weights)
+                
+                meta_model = lgb.train(
+                    params,
+                    train_data,
+                    num_boost_round=200,
+                    valid_sets=[train_data],
+                    callbacks=[lgb.early_stopping(50), lgb.log_evaluation(50)]
+                )
+        
+        elif args.meta_model == 'xgboost':
+            if not XGBOOST_AVAILABLE:
+                print("⚠️ XGBoost가 설치되지 않았습니다. Logistic Regression으로 대체합니다.")
+                meta_model = LogisticRegression(
+                    random_state=42,
+                    max_iter=1000,
+                    solver='lbfgs',
+                    multi_class='multinomial',
+                    C=1.0,
+                    class_weight='balanced'
+                )
+                meta_model.fit(X_meta_train_features, y_meta_train_labels)
+            else:
+                # 클래스 가중치 계산
+                class_counts = np.bincount(y_meta_train_labels)
+                class_weights = len(y_meta_train_labels) / (num_classes * class_counts)
+                sample_weights = class_weights[y_meta_train_labels]
+                
+                dtrain = xgb.DMatrix(X_meta_train_features, label=y_meta_train_labels, weight=sample_weights)
+                
+                params = {
+                    'objective': 'multi:softprob',
+                    'num_class': num_classes,
+                    'eval_metric': 'mlogloss',
+                    'max_depth': 5,
+                    'learning_rate': 0.05,
+                    'subsample': 0.8,
+                    'colsample_bytree': 0.8,
+                    'seed': 42,
+                    'tree_method': 'hist'
+                }
+                
+                meta_model = xgb.train(
+                    params,
+                    dtrain,
+                    num_boost_round=200,
+                    evals=[(dtrain, 'train')],
+                    early_stopping_rounds=50,
+                    verbose_eval=50
+                )
+        
+        else:
+            raise ValueError(f"Unknown meta_model: {args.meta_model}")
     
     # OOF 메타 예측 (Hold-out validation 데이터로 평가)
-    if args.meta_model == 'logistic':
-        oof_meta_preds = meta_model.predict(X_meta_val_features)
-        oof_meta_probs = meta_model.predict_proba(X_meta_val_features)
-    elif args.meta_model == 'lightgbm' and LIGHTGBM_AVAILABLE:
-        oof_meta_probs = meta_model.predict(X_meta_val_features)
-        oof_meta_preds = np.argmax(oof_meta_probs, axis=1)
-    elif args.meta_model == 'xgboost' and XGBOOST_AVAILABLE:
-        doof = xgb.DMatrix(X_meta_val_features)
-        oof_meta_probs = meta_model.predict(doof)
-        oof_meta_preds = np.argmax(oof_meta_probs, axis=1)
-    else:
+    try:
+        # MLJAR AutoML 모델인 경우
+        if args.meta_model == 'automl':
+            oof_meta_preds = meta_model.predict(X_meta_val_features)
+            oof_meta_probs = meta_model.predict_proba(X_meta_val_features)
+        # 기존 모델들
+        elif hasattr(meta_model, 'predict_proba'):
+            oof_meta_preds = meta_model.predict(X_meta_val_features)
+            oof_meta_probs = meta_model.predict_proba(X_meta_val_features)
+        else:
+            # LightGBM/XGBoost 모델인 경우
+            if args.meta_model == 'lightgbm' and LIGHTGBM_AVAILABLE:
+                oof_meta_preds = np.argmax(meta_model.predict(X_meta_val_features), axis=1)
+                oof_meta_probs = meta_model.predict(X_meta_val_features)
+            elif args.meta_model == 'xgboost' and XGBOOST_AVAILABLE:
+                dval = xgb.DMatrix(X_meta_val_features)
+                oof_meta_probs = meta_model.predict(dval)
+                oof_meta_preds = np.argmax(oof_meta_probs, axis=1)
+            else:
+                # Logistic Regression
+                oof_meta_preds = meta_model.predict(X_meta_val_features)
+                oof_meta_probs = meta_model.predict_proba(X_meta_val_features)
+    except:
+        # 폴백: Logistic Regression 방식
         oof_meta_preds = meta_model.predict(X_meta_val_features)
         oof_meta_probs = meta_model.predict_proba(X_meta_val_features)
     
@@ -1255,14 +1317,25 @@ def run_ultimate_experiment(args):
     ])
     
     # 메타 모델로 Test 예측
-    if args.meta_model == 'logistic':
-        test_probs_meta = meta_model.predict_proba(test_meta_features_extended)
-    elif args.meta_model == 'lightgbm' and LIGHTGBM_AVAILABLE:
-        test_probs_meta = meta_model.predict(test_meta_features_extended)
-    elif args.meta_model == 'xgboost' and XGBOOST_AVAILABLE:
-        dtest = xgb.DMatrix(test_meta_features_extended)
-        test_probs_meta = meta_model.predict(dtest)
-    else:
+    try:
+        # MLJAR AutoML 모델인 경우
+        if args.meta_model == 'automl':
+            test_probs_meta = meta_model.predict_proba(test_meta_features_extended)
+        # 기존 모델들
+        elif hasattr(meta_model, 'predict_proba'):
+            test_probs_meta = meta_model.predict_proba(test_meta_features_extended)
+        else:
+            # LightGBM/XGBoost 모델인 경우
+            if args.meta_model == 'lightgbm' and LIGHTGBM_AVAILABLE:
+                test_probs_meta = meta_model.predict(test_meta_features_extended)
+            elif args.meta_model == 'xgboost' and XGBOOST_AVAILABLE:
+                dtest = xgb.DMatrix(test_meta_features_extended)
+                test_probs_meta = meta_model.predict(dtest)
+            else:
+                # Logistic Regression
+                test_probs_meta = meta_model.predict_proba(test_meta_features_extended)
+    except:
+        # 폴백: Logistic Regression 방식
         test_probs_meta = meta_model.predict_proba(test_meta_features_extended)
     
     print(f"\n메타 스태킹 완료!")
@@ -1602,9 +1675,122 @@ def run_ultimate_experiment(args):
     
     print(f"보정된 샘플 수: {correction_count}/{len(test_probs_final)} ({correction_count/len(test_probs_final)*100:.1f}%)")
     
-    # 재정규화
+    # ========== Per-class Threshold Optimization ==========
+    print("\nPer-class Threshold Optimization...")
+    
+    # Hold-out 데이터로 임계값 최적화
+    X_meta_train, X_meta_val, y_meta_train, y_meta_val = train_test_split(
+        np.arange(len(oof_labels)), oof_labels, 
+        test_size=0.2, random_state=42, stratify=oof_labels
+    )
+    
+    # OOF 확률로 임계값 최적화
+    oof_probs_meta = weight_itrans * oof_itransformer + weight_tabtrans * oof_tabtransformer
+    
+    # 클래스별 임계값 최적화
+    def optimize_class_thresholds(y_true, y_probs, target_classes=[0, 9, 15], grid_size=21):
+        """특정 클래스들에 대한 임계값 최적화"""
+        best_thresholds = np.ones(num_classes) * 0.5
+        best_f1 = -1
+        
+        # 좌표 강하법
+        for iteration in range(3):
+            for c in target_classes:
+                best_score = -1
+                best_thresh = 0.5
+                
+                # 그리드 탐색
+                for thresh in np.linspace(0.3, 0.8, grid_size):
+                    # 임시 임계값으로 예측
+                    temp_thresholds = best_thresholds.copy()
+                    temp_thresholds[c] = thresh
+                    
+                    # 임계값 적용
+                    predictions = []
+                    for i in range(len(y_probs)):
+                        # 해당 클래스가 임계값을 넘는지 확인
+                        if y_probs[i, c] >= thresh:
+                            predictions.append(c)
+                        else:
+                            # 다른 클래스 중 최고 확률
+                            other_probs = y_probs[i].copy()
+                            other_probs[c] = 0  # 해당 클래스 제외
+                            predictions.append(np.argmax(other_probs))
+                    
+                    predictions = np.array(predictions)
+                    score = f1_score(y_true, predictions, average='macro')
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_thresh = thresh
+                
+                best_thresholds[c] = best_thresh
+            
+            # 전체 F1 계산
+            predictions = []
+            for i in range(len(y_probs)):
+                # 각 클래스별로 임계값 확인
+                valid_classes = []
+                for c in range(num_classes):
+                    if y_probs[i, c] >= best_thresholds[c]:
+                        valid_classes.append(c)
+                
+                if valid_classes:
+                    # 유효한 클래스 중 최고 확률
+                    valid_probs = y_probs[i, valid_classes]
+                    best_class_idx = np.argmax(valid_probs)
+                    predictions.append(valid_classes[best_class_idx])
+                else:
+                    # 모든 클래스가 임계값 미달 시 최고 확률
+                    predictions.append(np.argmax(y_probs[i]))
+            
+            predictions = np.array(predictions)
+            current_f1 = f1_score(y_true, predictions, average='macro')
+            
+            if current_f1 > best_f1:
+                best_f1 = current_f1
+            else:
+                break
+        
+        return best_thresholds, best_f1
+    
+    # Hold-out 데이터로 임계값 최적화
+    val_probs = oof_probs_meta[X_meta_val]
+    val_labels = y_meta_val
+    
+    print("클래스별 임계값 최적화 중...")
+    optimal_thresholds, optimal_f1 = optimize_class_thresholds(
+        val_labels, val_probs, target_classes=[0, 9, 15]
+    )
+    
+    print(f"최적 임계값:")
+    for c in [0, 9, 15]:
+        print(f"  클래스 {c}: {optimal_thresholds[c]:.3f}")
+    print(f"Hold-out F1: {optimal_f1:.4f}")
+    
+    # 최적 임계값을 Test 데이터에 적용
+    print("Test 데이터에 최적 임계값 적용...")
+    test_predictions = []
+    for i in range(len(test_probs_final)):
+        # 각 클래스별로 임계값 확인
+        valid_classes = []
+        for c in range(num_classes):
+            if test_probs_final[i, c] >= optimal_thresholds[c]:
+                valid_classes.append(c)
+        
+        if valid_classes:
+            # 유효한 클래스 중 최고 확률
+            valid_probs = test_probs_final[i, valid_classes]
+            best_class_idx = np.argmax(valid_probs)
+            test_predictions.append(valid_classes[best_class_idx])
+        else:
+            # 모든 클래스가 임계값 미달 시 최고 확률
+            test_predictions.append(np.argmax(test_probs_final[i]))
+    
+    test_preds_final = np.array(test_predictions)
+    
+    # 재정규화 (임계값 적용 후)
     test_probs_final = test_probs_final / (test_probs_final.sum(axis=1, keepdims=True) + 1e-8)
-    test_preds_final = np.argmax(test_probs_final, axis=1)
     
     print("✅ Pairwise 보정 완료!")
     
@@ -1686,7 +1872,7 @@ def parse_args():
         '--meta_model',
         type=str,
         default='logistic',
-        choices=['logistic', 'lightgbm', 'xgboost'],
+        choices=['logistic', 'lightgbm', 'xgboost', 'automl'],
         help='메타 스태킹 모델 선택 (default: logistic)'
     )
     
