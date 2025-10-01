@@ -1,0 +1,177 @@
+Beginning AutoGluon training... Time limit = 60s
+AutoGluon will save models to 'C:\Users\user\Documents\dacon\smart\autogluon_advanced_timeseries_models'
+=================== System Info ===================
+AutoGluon Version:  1.4.0
+Python Version:     3.12.9
+Operating System:   Windows
+Platform Machine:   AMD64
+Platform Version:   10.0.26100
+CPU Count:          28
+GPU Count:          1
+Memory Avail:       23.23 GB / 63.71 GB (36.5%)
+Disk Space Avail:   385.85 GB / 1861.98 GB (20.7%)
+===================================================
+Setting presets to: best_quality
+
+Fitting with arguments:
+{'enable_ensemble': True,
+ 'eval_metric': WQL,
+ 'hyperparameters': {'ChronosModel': {'max_length': 52,
+                                      'model_path': 'amazon/chronos-t5-tiny'},
+                     'DLinearModel': {'individual': True, 'moving_avg': 25},
+                     'DirectTabularModel': {'tabular_hyperparameters': {'GBM': {'num_boost_round': 100},
+                                                                        'RF': {'n_estimators': 100}}},
+                     'PatchTSTModel': {'d_ff': 128,
+                                       'd_model': 64,
+                                       'e_layers': 2,
+                                       'n_heads': 4,
+                                       'patch_len': 8,
+                                       'stride': 4},
+                     'PerStepTabularModel': {'tabular_hyperparameters': {'GBM': {'num_boost_round': 50},
+                                                                         'RF': {'n_estimators': 50}}},
+                     'RecursiveTabularModel': {'tabular_hyperparameters': {'GBM': {'num_boost_round': 50},
+                                                                           'RF': {'n_estimators': 50}}},
+                     'SimpleFeedForwardModel': {'context_length': 52,
+                                                'hidden_dimensions': [64, 32]},
+                     'TemporalFusionTransformerModel': {'attention_head_size': 4,
+                                                        'dropout': 0.1,
+                                                        'hidden_size': 64,
+                                                        'lstm_layers': 2},
+                     'TiDEModel': {'hidden_dim': 64,
+                                   'num_layers': 2,
+                                   'temporal_width': 4},
+                     'WaveNetModel': {'kernel_size': 3,
+                                      'n_filters': 32,
+                                      'n_layers': 4}},
+ 'known_covariates_names': [],
+ 'num_val_windows': 2,
+ 'prediction_length': 1,
+ 'quantile_levels': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+ 'random_seed': 123,
+ 'refit_every_n_windows': 1,
+ 'refit_full': False,
+ 'skip_model_selection': False,
+ 'target': 'target',
+ 'time_limit': 60,
+ 'verbosity': 2}
+
+Beginning AutoGluon training... Time limit = 30s
+AutoGluon will save models to 'C:\Users\user\Documents\dacon\smart\autogluon_basic_timeseries_models'
+=================== System Info ===================
+AutoGluon Version:  1.4.0
+Python Version:     3.12.9
+Operating System:   Windows
+Platform Machine:   AMD64
+Platform Version:   10.0.26100
+CPU Count:          28
+GPU Count:          1
+Memory Avail:       22.83 GB / 63.71 GB (35.8%)
+Disk Space Avail:   385.85 GB / 1861.98 GB (20.7%)
+===================================================
+Setting presets to: medium_quality
+
+Fitting with arguments:
+{'enable_ensemble': True,
+ 'eval_metric': WQL,
+ 'hyperparameters': 'light',
+ 'known_covariates_names': [],
+ 'num_val_windows': 1,
+ 'prediction_length': 1,
+ 'quantile_levels': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+ 'random_seed': 123,
+ 'refit_every_n_windows': 1,
+ 'refit_full': False,
+ 'skip_model_selection': False,
+ 'target': 'target',
+ 'time_limit': 30,
+ 'verbosity': 2}
+
+Warning: path already exists! This predictor may overwrite an existing predictor! path="autogluon_tabular_fallback"
+Verbosity: 2 (Standard Logging)
+=================== System Info ===================
+AutoGluon Version:  1.4.0
+Python Version:     3.12.9
+Operating System:   Windows
+Platform Machine:   AMD64
+Platform Version:   10.0.26100
+CPU Count:          28
+Memory Avail:       22.82 GB / 63.71 GB (35.8%)
+Disk Space Avail:   385.85 GB / 1861.98 GB (20.7%)
+===================================================
+Presets specified: ['best_quality']
+Using hyperparameters preset: hyperparameters='zeroshot'
+Setting dynamic_stacking from 'auto' to True. Reason: Enable dynamic_stacking when use_bag_holdout is disabled. (use_bag_holdout=False)
+Stack configuration (auto_stack=True): num_stack_levels=1, num_bag_folds=8, num_bag_sets=1
+DyStack is enabled (dynamic_stacking=True). AutoGluon will try to determine whether the input data is affected by stacked overfitting and enable or disable stacking as a consequence.
+	This is used to identify the optimal `num_stack_levels` value. Copies of AutoGluon will be fit on subsets of the data. Then holdout validation data is used to detect stacked overfitting.
+	Running DyStack for up to 5s of the 20s of remaining time (25%).
+	Running DyStack sub-fit in a ray process to avoid memory leakage. Enabling ray logging (enable_ray_logging=True). Specify `ds_args={'enable_ray_logging': False}` if you experience logging issues.
+Warning: Not enough time to fit DyStack! Skipping...
+	1	 = Optimal   num_stack_levels (Stacked Overfitting Occurred: False)
+	7s	 = DyStack   runtime |	13s	 = Remaining runtime
+Starting main fit with num_stack_levels=1.
+	For future fit calls on this dataset, you can skip DyStack to save time: `predictor.fit(..., dynamic_stacking=False, num_stack_levels=1)`
+Beginning AutoGluon training ... Time limit = 13s
+AutoGluon will save models to "C:\Users\user\Documents\dacon\smart\autogluon_tabular_fallback"
+Train Data Rows:    21693
+Train Data Columns: 52
+Label Column:       target
+Problem Type:       multiclass
+Preprocessing data ...
+Train Data Class Count: 21
+Using Feature Generators to preprocess the data ...
+Fitting AutoMLPipelineFeatureGenerator...
+	Available Memory:                    21496.30 MB
+	Train Data (Original)  Memory Usage: 8.61 MB (0.0% of available memory)
+	Inferring data type of each feature based on column values. Set feature_metadata_in to manually specify special dtypes of the features.
+	Stage 1 Generators:
+		Fitting AsTypeFeatureGenerator...
+	Stage 2 Generators:
+		Fitting FillNaFeatureGenerator...
+	Stage 3 Generators:
+		Fitting IdentityFeatureGenerator...
+	Stage 4 Generators:
+		Fitting DropUniqueFeatureGenerator...
+	Stage 5 Generators:
+		Fitting DropDuplicatesFeatureGenerator...
+	Types of features in original data (raw dtype, special dtypes):
+		('float', []) : 52 | ['X_01', 'X_02', 'X_03', 'X_04', 'X_05', ...]
+	Types of features in processed data (raw dtype, special dtypes):
+		('float', []) : 52 | ['X_01', 'X_02', 'X_03', 'X_04', 'X_05', ...]
+	0.2s = Fit runtime
+	52 features in original data used to generate 52 features in processed data.
+	Train Data (Processed) Memory Usage: 8.61 MB (0.0% of available memory)
+Data preprocessing and feature engineering runtime = 0.18s ...
+AutoGluon will gauge predictive performance using evaluation metric: 'f1_macro'
+	To change this, specify the eval_metric parameter of Predictor()
+Large model count detected (110 configs) ... Only displaying the first 3 models of each family. To see all, set `verbosity=3`.
+User-specified model hyperparameters to be fit:
+{
+	'NN_TORCH': [{}, {'activation': 'elu', 'dropout_prob': 0.10077639529843717, 'hidden_size': 108, 'learning_rate': 0.002735937344002146, 'num_layers': 4, 'use_batchnorm': True, 'weight_decay': 1.356433327634438e-12, 'ag_args': {'name_suffix': '_r79', 'priority': -2}}, {'activation': 'elu', 'dropout_prob': 0.11897478034205347, 'hidden_size': 213, 'learning_rate': 0.0010474382260641949, 'num_layers': 4, 'use_batchnorm': False, 'weight_decay': 5.594471067786272e-10, 'ag_args': {'name_suffix': '_r22', 'priority': -7}}],
+	'GBM': [{'extra_trees': True, 'ag_args': {'name_suffix': 'XT'}}, {}, {'learning_rate': 0.03, 'num_leaves': 128, 'feature_fraction': 0.9, 'min_data_in_leaf': 3, 'ag_args': {'name_suffix': 'Large', 'priority': 0, 'hyperparameter_tune_kwargs': None}}],
+	'CAT': [{}, {'depth': 6, 'grow_policy': 'SymmetricTree', 'l2_leaf_reg': 2.1542798306067823, 'learning_rate': 0.06864209415792857, 'max_ctr_complexity': 4, 'one_hot_max_size': 10, 'ag_args': {'name_suffix': '_r177', 'priority': -1}}, {'depth': 8, 'grow_policy': 'Depthwise', 'l2_leaf_reg': 2.7997999596449104, 'learning_rate': 0.031375015734637225, 'max_ctr_complexity': 2, 'one_hot_max_size': 3, 'ag_args': {'name_suffix': '_r9', 'priority': -5}}],
+	'XGB': [{}, {'colsample_bytree': 0.6917311125174739, 'enable_categorical': False, 'learning_rate': 0.018063876087523967, 'max_depth': 10, 'min_child_weight': 0.6028633586934382, 'ag_args': {'name_suffix': '_r33', 'priority': -8}}, {'colsample_bytree': 0.6628423832084077, 'enable_categorical': False, 'learning_rate': 0.08775715546881824, 'max_depth': 5, 'min_child_weight': 0.6294123374222513, 'ag_args': {'name_suffix': '_r89', 'priority': -16}}],
+	'FASTAI': [{}, {'bs': 256, 'emb_drop': 0.5411770367537934, 'epochs': 43, 'layers': [800, 400], 'lr': 0.01519848858318159, 'ps': 0.23782946566604385, 'ag_args': {'name_suffix': '_r191', 'priority': -4}}, {'bs': 2048, 'emb_drop': 0.05070411322605811, 'epochs': 29, 'layers': [200, 100], 'lr': 0.08974235041576624, 'ps': 0.10393466140748028, 'ag_args': {'name_suffix': '_r102', 'priority': -11}}],
+	'RF': [{'criterion': 'gini', 'ag_args': {'name_suffix': 'Gini', 'problem_types': ['binary', 'multiclass']}}, {'criterion': 'entropy', 'ag_args': {'name_suffix': 'Entr', 'problem_types': ['binary', 'multiclass']}}, {'criterion': 'squared_error', 'ag_args': {'name_suffix': 'MSE', 'problem_types': ['regression', 'quantile']}}],
+	'XT': [{'criterion': 'gini', 'ag_args': {'name_suffix': 'Gini', 'problem_types': ['binary', 'multiclass']}}, {'criterion': 'entropy', 'ag_args': {'name_suffix': 'Entr', 'problem_types': ['binary', 'multiclass']}}, {'criterion': 'squared_error', 'ag_args': {'name_suffix': 'MSE', 'problem_types': ['regression', 'quantile']}}],
+}
+AutoGluon will fit 2 stack levels (L1 to L2) ...
+Fitting 108 L1 models, fit_strategy="sequential" ...
+Fitting model: NeuralNetFastAI_BAG_L1 ... Training model for up to 8.33s of the 12.50s of remaining time.
+	Fitting 8 child models (S1F1 - S1F8) | Fitting with ParallelLocalFoldFittingStrategy (8 workers, per: cpus=3, gpus=0, memory=0.44%)
+	0.6781	 = Validation score   (f1_macro)
+	10.76s	 = Training   runtime
+	0.37s	 = Validation runtime
+Fitting model: WeightedEnsemble_L2 ... Training model for up to 12.50s of the -1.83s of remaining time.
+	Ensemble Weights: {'NeuralNetFastAI_BAG_L1': 1.0}
+	0.6781	 = Validation score   (f1_macro)
+	0.01s	 = Training   runtime
+	0.01s	 = Validation runtime
+Fitting 108 L2 models, fit_strategy="sequential" ...
+Fitting model: WeightedEnsemble_L3 ... Training model for up to 12.50s of the -1.98s of remaining time.
+	Ensemble Weights: {'NeuralNetFastAI_BAG_L1': 1.0}
+	0.6781	 = Validation score   (f1_macro)
+	0.01s	 = Training   runtime
+	0.01s	 = Validation runtime
+AutoGluon training complete, total runtime = 14.72s ... Best model: WeightedEnsemble_L2 | Estimated inference throughput: 7231.8 rows/s (2712 batch size)
+TabularPredictor saved. To load, use: predictor = TabularPredictor.load("C:\Users\user\Documents\dacon\smart\autogluon_tabular_fallback")

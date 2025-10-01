@@ -1,0 +1,136 @@
+[
+  {
+    "config_name": "meta_stacking",
+    "config": {
+      "name": "With Meta Stacking",
+      "use_calibration": true,
+      "calibration_method": "platt",
+      "use_threshold_opt": true,
+      "use_logit_adjustment": true,
+      "tau": 0.5,
+      "use_meta_stacking": true,
+      "model_variants": [
+        "base",
+        "wide",
+        "deep",
+        "narrow"
+      ]
+    },
+    "mean_f1": 0.8838846798164806,
+    "std_f1": 0.001113362700131674,
+    "max_f1": 0.8855750521672047,
+    "min_f1": 0.8823697793415389,
+    "fold_results": [
+      0.8830894912525098,
+      0.8823697793415389,
+      0.8845271423833923,
+      0.8855750521672047,
+      0.8838619339377575
+    ],
+    "duration": 1408.1048045158386
+  },
+  {
+    "config_name": "calibration",
+    "config": {
+      "name": "With Calibration",
+      "use_calibration": true,
+      "calibration_method": "platt",
+      "use_threshold_opt": false,
+      "use_logit_adjustment": false,
+      "use_meta_stacking": false,
+      "model_variants": [
+        "base"
+      ]
+    },
+    "mean_f1": 0.882959424465229,
+    "std_f1": 0.004960293281932016,
+    "max_f1": 0.8903705927051471,
+    "min_f1": 0.8748573781689398,
+    "fold_results": [
+      0.8844206115875237,
+      0.8826796798735295,
+      0.8748573781689398,
+      0.8824688599910047,
+      0.8903705927051471
+    ],
+    "duration": 283.2201430797577
+  },
+  {
+    "config_name": "logit_adjustment",
+    "config": {
+      "name": "With Logit Adjustment",
+      "use_calibration": true,
+      "calibration_method": "platt",
+      "use_threshold_opt": true,
+      "use_logit_adjustment": true,
+      "tau": 0.5,
+      "use_meta_stacking": false,
+      "model_variants": [
+        "base"
+      ]
+    },
+    "mean_f1": 0.8827391283290135,
+    "std_f1": 0.004283387570427827,
+    "max_f1": 0.8876310019090852,
+    "min_f1": 0.8753196649468693,
+    "fold_results": [
+      0.8839318900268137,
+      0.8753196649468693,
+      0.8811213052065461,
+      0.8876310019090852,
+      0.8856917795557531
+    ],
+    "duration": 303.2041025161743
+  },
+  {
+    "config_name": "baseline",
+    "config": {
+      "name": "Baseline TabTransformer",
+      "use_calibration": false,
+      "use_threshold_opt": false,
+      "use_logit_adjustment": false,
+      "use_meta_stacking": false,
+      "model_variants": [
+        "base"
+      ]
+    },
+    "mean_f1": 0.8807942617328534,
+    "std_f1": 0.0034189213313003237,
+    "max_f1": 0.88494117431216,
+    "min_f1": 0.8754249519329391,
+    "fold_results": [
+      0.88494117431216,
+      0.8754249519329391,
+      0.8821219603058343,
+      0.8830492522757618,
+      0.8784339698375716
+    ],
+    "duration": 286.7252697944641
+  },
+  {
+    "config_name": "threshold_opt",
+    "config": {
+      "name": "With Threshold Optimization",
+      "use_calibration": true,
+      "calibration_method": "platt",
+      "use_threshold_opt": true,
+      "use_logit_adjustment": false,
+      "use_meta_stacking": false,
+      "model_variants": [
+        "base"
+      ]
+    },
+    "mean_f1": 0.8793958889483093,
+    "std_f1": 0.005952279585300142,
+    "max_f1": 0.8866827879649806,
+    "min_f1": 0.870781314050977,
+    "fold_results": [
+      0.8866827879649806,
+      0.870781314050977,
+      0.8794623808266732,
+      0.8750747817636592,
+      0.8849781801352565
+    ],
+    "duration": 295.06417775154114
+  }
+]

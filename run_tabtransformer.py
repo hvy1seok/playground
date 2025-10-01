@@ -135,7 +135,7 @@ def main():
         
         best_f1, best_state = 0, None
         patience, wait = 7, 0
-        max_epochs = 30
+        max_epochs = 100
         
         for epoch in range(1, max_epochs + 1):
             # Train

@@ -1,0 +1,87 @@
+_wandb:
+    value:
+        cli_version: 0.22.0
+        e:
+            gk9l0kx066kk0qxwhxr591t2qiudw7yi:
+                args:
+                    - --d_model
+                    - "128"
+                    - --use_margin_loss
+                    - --use_cv
+                    - --use_specialist_ensemble
+                codePath: itransformer_classification.py
+                codePathLocal: itransformer_classification.py
+                cpu_count: 20
+                cpu_count_logical: 28
+                cudaVersion: "12.9"
+                disk:
+                    /:
+                        total: "1999283154944"
+                        used: "1567102885888"
+                email: npjws3690@gmail.com
+                executable: C:\Users\user\Documents\dacon\smart\.venv\Scripts\python.exe
+                git:
+                    commit: be1fe08334194b68b8bd448c04c9833412aadfac
+                    remote: https://github.com/hvy1seok/playground.git
+                gpu: NVIDIA GeForce RTX 4060 Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 3072
+                      memoryTotal: "8585740288"
+                      name: NVIDIA GeForce RTX 4060 Laptop GPU
+                      uuid: GPU-5d67b8f7-2277-8e48-3296-566e02691f6b
+                host: maison
+                memory:
+                    total: "68408893440"
+                os: Windows-11-10.0.26100-SP0
+                program: C:\Users\user\Documents\dacon\smart\itransformer_classification.py
+                python: CPython 3.12.9
+                root: C:\Users\user\Documents\dacon\smart
+                startedAt: "2025-09-21T04:52:04.644760Z"
+                writerId: gk9l0kx066kk0qxwhxr591t2qiudw7yi
+        m: []
+        python_version: 3.12.9
+        t:
+            "1":
+                - 1
+                - 5
+                - 53
+            "2":
+                - 1
+                - 5
+                - 53
+            "3":
+                - 2
+                - 13
+                - 16
+            "4": 3.12.9
+            "5": 0.22.0
+            "8":
+                - 3
+            "12": 0.22.0
+            "13": windows-amd64
+cv_scores:
+    value:
+        - 0.848552591320014
+        - 0.8629169443112659
+        - 0.8531043365750088
+        - 0.8544702201818278
+        - 0.8701112852133712
+cv_weights:
+    value:
+        - 0.19814700567036678
+        - 0.2010137997318284
+        - 0.19905097612409656
+        - 0.1993230423524083
+        - 0.20246517612129997
+ensemble_type:
+    value: cv_ensemble
+mean_cv_score:
+    value: 0.8578310755202976
+n_folds:
+    value: 5
+std_cv_score:
+    value: 0.007699315426487556
+submission_file:
+    value: itransformer_cv_ensemble_submission.csv

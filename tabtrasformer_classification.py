@@ -76,21 +76,22 @@ class CosineTransformer(nn.Module):
 # ----------------------------
 # 데이터 로딩
 # ----------------------------
-train_df = pd.read_csv("train.csv")
-test_df = pd.read_csv("test.csv")
+train_df = pd.read_csv("./datasests/train.csv")
+test_df = pd.read_csv("./datasests/test.csv")
 
 X = train_df.drop(columns=["ID", "target"]).values
 y = train_df["target"].values
 X_test = test_df.drop(columns=["ID"]).values
 
+# 스케일링 (훈련 데이터만으로 fit)
 scaler = RobustScaler()
-X = scaler.fit_transform(X)
-X_test = scaler.transform(X_test)
+X = scaler.fit_transform(X)  # 훈련 데이터로만 fit
+X_test = scaler.transform(X_test)  # 테스트 데이터는 transform만
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 test_tensor = torch.tensor(X_test, dtype=torch.float32)
-test_loader = DataLoader(TensorDataset(test_tensor, torch.zeros(len(test_tensor))), batch_size=256)
+    test_loader = DataLoader(TensorDataset(test_tensor, torch.zeros(len(test_tensor))), batch_size=64)
 
 num_classes = len(np.unique(y))
 
@@ -106,15 +107,17 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X, y), 1):
     X_train, X_val = X[train_idx], X[val_idx]
     y_train, y_val = y[train_idx], y[val_idx]
 
+    # 일관된 배치 크기 사용
+    batch_size = 64
     train_loader = DataLoader(
         TensorDataset(torch.tensor(X_train, dtype=torch.float32),
                       torch.tensor(y_train, dtype=torch.long)),
-        batch_size=64, shuffle=True
+        batch_size=batch_size, shuffle=True
     )
     val_loader = DataLoader(
         TensorDataset(torch.tensor(X_val, dtype=torch.float32),
                       torch.tensor(y_val, dtype=torch.long)),
-        batch_size=256, shuffle=False
+        batch_size=batch_size, shuffle=False
     )
 
     model = CosineTransformer(
@@ -128,12 +131,16 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X, y), 1):
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=5, T_mult=2)
 
     best_f1, best_state = 0, None
-    patience, wait = 7, 0
-    max_epochs = 30
+    patience, wait = 10, 0  # patience 증가
+    max_epochs = 50  # max_epochs 증가
+    
+    # 학습률 스케줄러 개선
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, verbose=True)
 
     for epoch in range(1, max_epochs + 1):
         # Train
         model.train()
+        train_loss = 0
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad()
@@ -141,20 +148,28 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X, y), 1):
             loss = criterion(preds, yb)
             loss.backward()
             optimizer.step()
-        scheduler.step()
+            train_loss += loss.item()
 
         # Validation
         model.eval()
         all_preds, all_labels = [], []
+        val_loss = 0
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
                 preds = model(xb)
+                loss = criterion(preds, yb)
+                val_loss += loss.item()
                 all_preds.append(torch.argmax(preds, dim=1).cpu())
                 all_labels.append(yb.cpu())
+        
         f1 = f1_score(torch.cat(all_labels), torch.cat(all_preds), average="macro")
-        print(f"Epoch {epoch:02d} | Macro-F1: {f1:.4f}")
+        avg_train_loss = train_loss / len(train_loader)
+        avg_val_loss = val_loss / len(val_loader)
+        
+        print(f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Macro-F1: {f1:.4f}")
 
+        # Early stopping 개선
         if f1 > best_f1:
             best_f1 = f1
             best_state = model.state_dict()
@@ -162,8 +177,11 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X, y), 1):
         else:
             wait += 1
             if wait >= patience:
-                print("Early stopping triggered.")
+                print(f"Early stopping triggered at epoch {epoch} (patience: {patience})")
                 break
+        
+        # 스케줄러 업데이트 (F1 기반)
+        scheduler.step(f1)
 
     print(f"[Fold {fold}] Best Macro-F1: {best_f1:.4f}")
     fold_f1.append(best_f1)
@@ -185,9 +203,19 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X, y), 1):
 ensemble_probs = np.mean(test_probs_all, axis=0)
 ensemble_preds = np.argmax(ensemble_probs, axis=1)
 
+# 제출용 파일 (ID, target만)
 submission = pd.DataFrame({"ID": test_df["ID"], "target": ensemble_preds})
 submission.to_csv("submission_cosine_5fold.csv", index=False)
+
+# 상세 파일 (ID, target, 모든 클래스 확률)
+detailed = pd.DataFrame({
+    "ID": test_df["ID"],
+    "target": ensemble_preds,
+    **{f"prob_{i}": ensemble_probs[:, i] for i in range(num_classes)}
+})
+detailed.to_csv("tabtransformer_5fold_detailed.csv", index=False)
 
 print("\nFold별 F1:", fold_f1)
 print("평균 F1:", np.mean(fold_f1))
 print("submission_cosine_5fold.csv 저장 완료")
+print("tabtransformer_5fold_detailed.csv 저장 완료")

@@ -1,0 +1,187 @@
+_wandb:
+    value:
+        cli_version: 0.22.0
+        e:
+            dlngbtdb3y93cm7jfy7h3ut1ldkrvibb:
+                args:
+                    - --d_model
+                    - "128"
+                    - --use_margin_loss
+                    - --use_cv
+                codePath: itransformer_classification.py
+                codePathLocal: itransformer_classification.py
+                cpu_count: 20
+                cpu_count_logical: 28
+                cudaVersion: "12.9"
+                disk:
+                    /:
+                        total: "1999283154944"
+                        used: "1567122722816"
+                email: npjws3690@gmail.com
+                executable: C:\Users\user\Documents\dacon\smart\.venv\Scripts\python.exe
+                git:
+                    commit: be1fe08334194b68b8bd448c04c9833412aadfac
+                    remote: https://github.com/hvy1seok/playground.git
+                gpu: NVIDIA GeForce RTX 4060 Laptop GPU
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Ada
+                      cudaCores: 3072
+                      memoryTotal: "8585740288"
+                      name: NVIDIA GeForce RTX 4060 Laptop GPU
+                      uuid: GPU-5d67b8f7-2277-8e48-3296-566e02691f6b
+                host: maison
+                memory:
+                    total: "68408893440"
+                os: Windows-11-10.0.26100-SP0
+                program: C:\Users\user\Documents\dacon\smart\itransformer_classification.py
+                python: CPython 3.12.9
+                root: C:\Users\user\Documents\dacon\smart
+                startedAt: "2025-09-21T05:09:28.957165Z"
+                writerId: dlngbtdb3y93cm7jfy7h3ut1ldkrvibb
+        m: []
+        python_version: 3.12.9
+        t:
+            "1":
+                - 1
+                - 5
+                - 53
+            "2":
+                - 1
+                - 5
+                - 53
+            "3":
+                - 2
+                - 13
+                - 16
+            "4": 3.12.9
+            "5": 0.22.0
+            "8":
+                - 3
+            "10":
+                - 20
+            "12": 0.22.0
+            "13": windows-amd64
+activation:
+    value: gelu
+augmentation_prob:
+    value: 0.5
+batch_size:
+    value: 64
+class_weights:
+    value:
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+        - 1
+contrastive_weight:
+    value: 0.001
+cv_save_dir:
+    value: cv_models
+cv_scores:
+    value: []
+d_ff:
+    value: 128
+d_model:
+    value: 128
+dropout:
+    value: 0.1
+e_layers:
+    value: 4
+embed:
+    value: timeF
+enc_in:
+    value: 1
+factor:
+    value: 1
+focal_alpha:
+    value: 1
+focal_gamma:
+    value: 2
+freq:
+    value: h
+jitter_sigma:
+    value: 0.03
+learning_rate:
+    value: 0.001
+lradj:
+    value: cosine
+margin_weight:
+    value: 0.01
+mixup_alpha:
+    value: 0.2
+n_folds:
+    value: 5
+n_heads:
+    value: 8
+num_class:
+    value: 21
+patience:
+    value: 20
+pred_len:
+    value: 0
+problem_classes:
+    value:
+        - 0
+        - 9
+        - 15
+seq_len:
+    value: 52
+specialist_alpha:
+    value: 0.3
+specialist_classes:
+    value:
+        - 0
+        - 9
+        - 15
+specialist_epochs:
+    value: 10
+specialist_lr:
+    value: 0.001
+task_name:
+    value: classification
+timewarp_sigma:
+    value: 0.2
+train_epochs:
+    value: 100
+use_class_weights:
+    value: true
+use_contrastive_loss:
+    value: false
+use_cosine_attention:
+    value: false
+use_cv:
+    value: true
+use_data_augmentation:
+    value: false
+use_focal_loss:
+    value: false
+use_margin_loss:
+    value: true
+use_specialist_ensemble:
+    value: false
+use_wandb:
+    value: true
+wandb_entity:
+    value: null
+wandb_project:
+    value: itransformer-classification-advanced-cv-fold-5
+window_slice_ratio:
+    value: 0.9

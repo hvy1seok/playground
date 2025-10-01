@@ -1,0 +1,9 @@
+autogluon[timeseries]
+torch
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+prophet
+statsmodels
