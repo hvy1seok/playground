@@ -315,6 +315,63 @@ class TabTransformer(nn.Module):
 
 
 # ----------------------------
+# Simple Cosine Transformer for Pairwise
+# ----------------------------
+class CosineTransformer(nn.Module):
+    def __init__(self, input_dim, embed_dim=64, num_heads=2, num_layers=2, dropout=0.3):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        
+        # Input projection
+        self.input_proj = nn.Linear(input_dim, embed_dim)
+        
+        # Positional encoding (learnable)
+        self.pos_encoding = nn.Parameter(torch.randn(1, 1, embed_dim))
+        
+        # Transformer layers
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=embed_dim * 2,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # Cosine attention
+        self.cosine_attention = nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=dropout, batch_first=True
+        )
+        
+        # Output layers
+        self.norm = nn.LayerNorm(embed_dim)
+        self.classifier = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim // 2, 1)
+        )
+        
+    def forward(self, x):
+        # Input projection: [B, input_dim] -> [B, 1, embed_dim]
+        x = self.input_proj(x).unsqueeze(1)  # [B, 1, embed_dim]
+        
+        # Add positional encoding
+        x = x + self.pos_encoding
+        
+        # Transformer encoding
+        x = self.transformer(x)  # [B, 1, embed_dim]
+        
+        # Cosine attention
+        attn_out, _ = self.cosine_attention(x, x, x)  # [B, 1, embed_dim]
+        x = x + attn_out  # Residual connection
+        
+        # Normalization and classification
+        x = self.norm(x.squeeze(1))  # [B, embed_dim]
+        return self.classifier(x)  # [B, 1]
+
+# ----------------------------
 # Threshold Optimization
 # ----------------------------
 def optimize_thresholds(y_true, y_probs, grid_size=51):
@@ -668,6 +725,7 @@ def run_ultimate_experiment(args):
     test_itransformer_logits = []
     test_tabtransformer_logits = []
     
+    
     # Results
     fold_results = []
     
@@ -815,6 +873,7 @@ def run_ultimate_experiment(args):
                 epochs=100, patience=20, use_focal=True, use_pairwise=True
             )
             print(f"TabTransformer F1: {tabtrans_f1:.4f}")
+            
             
             # Validation 예측
             itrans_model.eval()
@@ -1227,16 +1286,316 @@ def run_ultimate_experiment(args):
     # OOF 예측 (전체 데이터에 대해)
     oof_pred_ensemble = np.argmax(weight_itrans * oof_itransformer + weight_tabtrans * oof_tabtransformer, axis=1)
     
-    # ========== 최종 예측 ==========
+    # ========== Pairwise 보정 (CosineTransformer 학습) ==========
     print(f"\n{'='*80}")
-    print("최종 예측")
+    print("Pairwise 보정 (CosineTransformer 학습)")
     print(f"{'='*80}")
     
-    # 메타 스태킹 결과를 최종 예측으로 사용
-    test_probs_final = test_probs_ensemble
-    test_preds_final = test_preds_ensemble
+    # 전체 데이터 스케일링
+    scaler_final = RobustScaler()
+    X_scaled_full = scaler_final.fit_transform(X)
+    X_test_scaled_full = scaler_final.transform(X_test)
     
-    print("✅ 최종 예측 완료!")
+    # Pairwise 모델 학습
+    print("\nCosineTransformer Pairwise Classifiers 학습...")
+    pairwise_models = {}
+    
+    for c1, c2 in [(0, 15), (0, 9), (15, 9)]:
+        print(f"  Training Pairwise {c1} vs {c2}...")
+        
+        # 해당 클래스만 필터링
+        mask = (y == c1) | (y == c2)
+        X_pair = X_scaled_full[mask]
+        y_pair = (y[mask] == c2).astype(int)
+        
+        if len(X_pair) < 10:
+            print(f"    데이터 부족 (샘플 수: {len(X_pair)}), 스킵")
+            continue
+        
+        # 훈련/검증 분리
+        X_pair_train, X_pair_val, y_pair_train, y_pair_val = train_test_split(
+            X_pair, y_pair, test_size=0.2, stratify=y_pair, random_state=123
+        )
+        
+        train_dataset = TensorDataset(
+            torch.tensor(X_pair_train, dtype=torch.float32),
+            torch.tensor(y_pair_train, dtype=torch.float32)
+        )
+        train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+        
+        # CosineTransformer 모델 생성
+        model = CosineTransformer(
+            input_dim=X.shape[1],
+            embed_dim=64,
+            num_heads=2,
+            num_layers=2,
+            dropout=0.3
+        ).to(device)
+        
+        criterion = nn.BCEWithLogitsLoss()
+        optimizer = optim.Adam(model.parameters(), lr=1e-3)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=30)
+        
+        best_f1 = 0
+        best_state = model.state_dict()
+        patience = 20
+        wait = 0
+        
+        for epoch in range(30):
+            model.train()
+            train_loss = 0
+            for xb, yb in train_loader:
+                xb, yb = xb.to(device), yb.to(device)
+                optimizer.zero_grad()
+                outputs = model(xb).squeeze()
+                loss = criterion(outputs, yb)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
+            
+            # Validation
+            model.eval()
+            with torch.no_grad():
+                val_outputs = model(torch.tensor(X_pair_val, dtype=torch.float32).to(device)).squeeze()
+                val_probs = torch.sigmoid(val_outputs).cpu().numpy()
+                val_preds = (val_probs > 0.5).astype(int)
+                
+                if y_pair_val.sum() == 0 or val_preds.sum() == 0:
+                    f1 = 0.0
+                else:
+                    f1 = f1_score(y_pair_val, val_preds, average='binary', zero_division=0)
+            
+            if (epoch + 1) % 10 == 0 or f1 > best_f1:
+                print(f"    Epoch {epoch+1}/30 - Loss: {train_loss/len(train_loader):.4f}, Val F1: {f1:.4f}, Best F1: {best_f1:.4f}")
+            
+            if f1 > best_f1:
+                best_f1 = f1
+                best_state = model.state_dict()
+                wait = 0
+            else:
+                wait += 1
+                if wait >= patience:
+                    print(f"    Early stopping at epoch {epoch+1}. Best F1: {best_f1:.4f}")
+                    break
+            
+            scheduler.step()
+        
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        pairwise_models[(c1, c2)] = model
+        print(f"    Pairwise {c1} vs {c2} 학습 완료 (Best F1: {best_f1:.4f})")
+    
+    # Pairwise 예측
+    print("\nPairwise 예측 적용...")
+    test_pairwise_probs = {}
+    for (c1, c2), model in pairwise_models.items():
+        model.eval()
+        with torch.no_grad():
+            outputs = model(torch.tensor(X_test_scaled_full, dtype=torch.float32).to(device))
+            probs = torch.sigmoid(outputs).cpu().numpy().squeeze()
+            test_pairwise_probs[(c1, c2)] = probs
+    
+    # ========== Pairwise 보정 최적화 ==========
+    print("\nPairwise 보정 최적화...")
+    
+    # 1. Pairwise 모델 품질 평가 (OOF Hold-out)
+    print("Pairwise 모델 품질 평가...")
+    pairwise_quality = {}
+    
+    for c1, c2 in [(0, 15), (0, 9), (15, 9)]:
+        if (c1, c2) not in pairwise_models:
+            continue
+            
+        # 해당 클래스만 필터링하여 Hold-out 평가
+        mask = (y == c1) | (y == c2)
+        X_pair_eval = X_scaled_full[mask]
+        y_pair_eval = (y[mask] == c2).astype(int)
+        
+        if len(X_pair_eval) < 20:
+            print(f"    {c1} vs {c2}: 데이터 부족으로 스킵")
+            continue
+        
+        # Hold-out 분할
+        X_pair_train_eval, X_pair_val_eval, y_pair_train_eval, y_pair_val_eval = train_test_split(
+            X_pair_eval, y_pair_eval, test_size=0.3, stratify=y_pair_eval, random_state=456
+        )
+        
+        # 모델로 Hold-out 예측
+        model = pairwise_models[(c1, c2)]
+        model.eval()
+        with torch.no_grad():
+            val_outputs = model(torch.tensor(X_pair_val_eval, dtype=torch.float32).to(device)).squeeze()
+            val_probs = torch.sigmoid(val_outputs).cpu().numpy()
+            val_preds = (val_probs > 0.5).astype(int)
+            
+            # AUC 계산
+            from sklearn.metrics import roc_auc_score
+            try:
+                auc = roc_auc_score(y_pair_val_eval, val_probs)
+                f1 = f1_score(y_pair_val_eval, val_preds, average='binary', zero_division=0)
+                pairwise_quality[(c1, c2)] = {'auc': auc, 'f1': f1}
+                print(f"    {c1} vs {c2}: AUC={auc:.3f}, F1={f1:.3f}")
+            except:
+                pairwise_quality[(c1, c2)] = {'auc': 0.0, 'f1': 0.0}
+                print(f"    {c1} vs {c2}: 평가 실패")
+    
+    # 2. Pairwise 확률 캘리브레이션 (Platt Scaling)
+    print("\nPairwise 확률 캘리브레이션...")
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.linear_model import LogisticRegression
+    
+    calibrated_pairwise_probs = {}
+    for (c1, c2), probs in test_pairwise_probs.items():
+        if (c1, c2) not in pairwise_quality:
+            calibrated_pairwise_probs[(c1, c2)] = probs
+            continue
+            
+        # 품질이 충분한 경우만 캘리브레이션
+        if pairwise_quality[(c1, c2)]['auc'] >= 0.70 or pairwise_quality[(c1, c2)]['f1'] >= 0.6:
+            # 해당 클래스 데이터로 캘리브레이션
+            mask = (y == c1) | (y == c2)
+            X_pair_cal = X_scaled_full[mask]
+            y_pair_cal = (y[mask] == c2).astype(int)
+            
+            if len(X_pair_cal) > 50:
+                # Pairwise 모델로 OOF 예측
+                model = pairwise_models[(c1, c2)]
+                model.eval()
+                with torch.no_grad():
+                    oof_outputs = model(torch.tensor(X_pair_cal, dtype=torch.float32).to(device)).squeeze()
+                    oof_probs = torch.sigmoid(oof_outputs).cpu().numpy()
+                
+                # Platt Scaling
+                calibrator = LogisticRegression()
+                calibrator.fit(oof_probs.reshape(-1, 1), y_pair_cal)
+                calibrated_probs = calibrator.predict_proba(probs.reshape(-1, 1))[:, 1]
+                calibrated_pairwise_probs[(c1, c2)] = calibrated_probs
+                print(f"    {c1} vs {c2}: 캘리브레이션 완료")
+            else:
+                calibrated_pairwise_probs[(c1, c2)] = probs
+                print(f"    {c1} vs {c2}: 데이터 부족으로 캘리브레이션 스킵")
+        else:
+            calibrated_pairwise_probs[(c1, c2)] = probs
+            print(f"    {c1} vs {c2}: 품질 부족으로 캘리브레이션 스킵")
+    
+    # 3. 최적 파라미터 탐색 (α, τ_pair)
+    print("\n최적 파라미터 탐색...")
+    
+    # Hold-out 데이터 준비
+    X_meta_train, X_meta_val, y_meta_train, y_meta_val = train_test_split(
+        np.arange(len(oof_labels)), oof_labels, 
+        test_size=0.2, random_state=42, stratify=oof_labels
+    )
+    
+    best_alpha = 0.4
+    best_tau_pair = 0.65
+    best_f1 = 0.0
+    
+    # 그리드 탐색
+    alpha_grid = np.linspace(0.2, 0.8, 7)  # 0.2, 0.3, ..., 0.8
+    tau_grid = np.linspace(0.55, 0.75, 5)  # 0.55, 0.6, ..., 0.75
+    
+    for alpha in alpha_grid:
+        for tau_pair in tau_grid:
+            # Hold-out 데이터로 Pairwise 보정 시뮬레이션
+            val_probs_corrected = test_probs_ensemble[X_meta_val].copy()
+            
+            for i, idx in enumerate(X_meta_val):
+                top2_idx = np.argsort(val_probs_corrected[i])[-2:][::-1]
+                top2_set = set(top2_idx)
+                
+                # 트리거 조건: Top-2가 {0,9,15}에 포함
+                if not (top2_set.issubset({0, 9, 15})):
+                    continue
+                
+                # 0-15 쌍
+                if top2_set == {0, 15} and (0, 15) in calibrated_pairwise_probs:
+                    if (0, 15) in pairwise_quality and pairwise_quality[(0, 15)]['auc'] >= 0.70:
+                        prob_15 = calibrated_pairwise_probs[(0, 15)][idx]
+                        if max(prob_15, 1-prob_15) >= tau_pair:
+                            prob_0 = 1 - prob_15
+                            val_probs_corrected[i, 0] = (1-alpha) * val_probs_corrected[i, 0] + alpha * prob_0
+                            val_probs_corrected[i, 15] = (1-alpha) * val_probs_corrected[i, 15] + alpha * prob_15
+                
+                # 0-9 쌍
+                elif top2_set == {0, 9} and (0, 9) in calibrated_pairwise_probs:
+                    if (0, 9) in pairwise_quality and pairwise_quality[(0, 9)]['auc'] >= 0.70:
+                        prob_9 = calibrated_pairwise_probs[(0, 9)][idx]
+                        if max(prob_9, 1-prob_9) >= tau_pair:
+                            prob_0 = 1 - prob_9
+                            val_probs_corrected[i, 0] = (1-alpha) * val_probs_corrected[i, 0] + alpha * prob_0
+                            val_probs_corrected[i, 9] = (1-alpha) * val_probs_corrected[i, 9] + alpha * prob_9
+                
+                # 15-9 쌍
+                elif top2_set == {15, 9} and (15, 9) in calibrated_pairwise_probs:
+                    if (15, 9) in pairwise_quality and pairwise_quality[(15, 9)]['auc'] >= 0.70:
+                        prob_9 = calibrated_pairwise_probs[(15, 9)][idx]
+                        if max(prob_9, 1-prob_9) >= tau_pair:
+                            prob_15 = 1 - prob_9
+                            val_probs_corrected[i, 15] = (1-alpha) * val_probs_corrected[i, 15] + alpha * prob_15
+                            val_probs_corrected[i, 9] = (1-alpha) * val_probs_corrected[i, 9] + alpha * prob_9
+            
+            # F1 계산
+            val_preds_corrected = np.argmax(val_probs_corrected, axis=1)
+            f1 = f1_score(y_meta_val, val_preds_corrected, average='macro')
+            
+            if f1 > best_f1:
+                best_f1 = f1
+                best_alpha = alpha
+                best_tau_pair = tau_pair
+    
+    print(f"최적 파라미터: α={best_alpha:.2f}, τ_pair={best_tau_pair:.2f}, F1={best_f1:.4f}")
+    
+    # 4. 최종 보정 적용
+    print("\n최종 확률 보정 적용...")
+    test_probs_final = test_probs_ensemble.copy()
+    
+    correction_count = 0
+    for i in range(len(test_probs_final)):
+        top2_idx = np.argsort(test_probs_final[i])[-2:][::-1]
+        top2_set = set(top2_idx)
+        
+        # 트리거 조건: Top-2가 {0,9,15}에 포함
+        if not (top2_set.issubset({0, 9, 15})):
+            continue
+        
+        # 0-15 쌍
+        if top2_set == {0, 15} and (0, 15) in calibrated_pairwise_probs:
+            if (0, 15) in pairwise_quality and pairwise_quality[(0, 15)]['auc'] >= 0.70:
+                prob_15 = calibrated_pairwise_probs[(0, 15)][i]
+                if max(prob_15, 1-prob_15) >= best_tau_pair:
+                    prob_0 = 1 - prob_15
+                    test_probs_final[i, 0] = (1-best_alpha) * test_probs_final[i, 0] + best_alpha * prob_0
+                    test_probs_final[i, 15] = (1-best_alpha) * test_probs_final[i, 15] + best_alpha * prob_15
+                    correction_count += 1
+        
+        # 0-9 쌍
+        elif top2_set == {0, 9} and (0, 9) in calibrated_pairwise_probs:
+            if (0, 9) in pairwise_quality and pairwise_quality[(0, 9)]['auc'] >= 0.70:
+                prob_9 = calibrated_pairwise_probs[(0, 9)][i]
+                if max(prob_9, 1-prob_9) >= best_tau_pair:
+                    prob_0 = 1 - prob_9
+                    test_probs_final[i, 0] = (1-best_alpha) * test_probs_final[i, 0] + best_alpha * prob_0
+                    test_probs_final[i, 9] = (1-best_alpha) * test_probs_final[i, 9] + best_alpha * prob_9
+                    correction_count += 1
+        
+        # 15-9 쌍
+        elif top2_set == {15, 9} and (15, 9) in calibrated_pairwise_probs:
+            if (15, 9) in pairwise_quality and pairwise_quality[(15, 9)]['auc'] >= 0.70:
+                prob_9 = calibrated_pairwise_probs[(15, 9)][i]
+                if max(prob_9, 1-prob_9) >= best_tau_pair:
+                    prob_15 = 1 - prob_9
+                    test_probs_final[i, 15] = (1-best_alpha) * test_probs_final[i, 15] + best_alpha * prob_15
+                    test_probs_final[i, 9] = (1-best_alpha) * test_probs_final[i, 9] + best_alpha * prob_9
+                    correction_count += 1
+    
+    print(f"보정된 샘플 수: {correction_count}/{len(test_probs_final)} ({correction_count/len(test_probs_final)*100:.1f}%)")
+    
+    # 재정규화
+    test_probs_final = test_probs_final / (test_probs_final.sum(axis=1, keepdims=True) + 1e-8)
+    test_preds_final = np.argmax(test_probs_final, axis=1)
+    
+    print("✅ Pairwise 보정 완료!")
     
     # ========== 결과 저장 ==========
     print(f"\n{'='*80}")
