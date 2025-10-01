@@ -1112,9 +1112,10 @@ def run_ultimate_experiment(args):
             # AutoML 설정
             meta_model = AutoML(
                 mode='Compete',  # 최고 성능 모드
-                total_time_limit=300,  # 5분
+                total_time_limit=1800,  # 30분
                 algorithms=['Random Forest', 'Extra Trees', 'Xgboost', 'LightGBM', 
-                          'CatBoost', 'Neural Network', 'Linear', 'Ensemble'],
+                          'CatBoost', 'Neural Network', 'Linear', 'Decision Tree', 
+                          'Nearest Neighbors', 'Baseline'],
                 train_ensemble=True,  # 앙상블 학습
                 stack_models=True,    # 스태킹 활성화
                 eval_metric='f1_macro',  # Macro-F1 평가
