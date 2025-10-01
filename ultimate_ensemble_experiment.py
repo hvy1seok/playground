@@ -1118,7 +1118,7 @@ def run_ultimate_experiment(args):
                           'Nearest Neighbors', 'Baseline'],
                 train_ensemble=True,  # 앙상블 학습
                 stack_models=True,    # 스태킹 활성화
-                eval_metric='f1_macro',  # Macro-F1 평가
+                eval_metric='f1',  # F1 평가
                 ml_task='multiclass_classification',  # 분류 작업 명시
                 validation_strategy={
                     'validation_type': 'split',
