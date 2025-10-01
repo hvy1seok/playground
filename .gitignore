@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+ultimate-checkpoints/
 # C extensions
 *.so
 
@@ -26,6 +26,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -166,3 +167,5 @@ result_anomaly_detection.txt
 scripts/augmentation/
 run_anylearn.py
 environment.txt
+
+*.pth
