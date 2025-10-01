@@ -1,0 +1,17 @@
+{
+  "method": "XGBOOST Meta-Stacking",
+  "use_augmentation": false,
+  "oof_f1_itransformer": 0.8614358395516403,
+  "oof_f1_tabtransformer": 0.8712081808384756,
+  "oof_f1_simple_weighted": 0.8736385168541987,
+  "oof_f1_meta_stacking": 0.9706825344869783,
+  "improvement": 0.09704401763277959,
+  "meta_features": {
+    "base_probs": 42,
+    "entropy": 2,
+    "top1_confidence": 2,
+    "margin": 2,
+    "agreement": 1,
+    "total": 49
+  }
+}

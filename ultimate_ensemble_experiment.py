@@ -1167,10 +1167,20 @@ def run_ultimate_experiment(args):
     
     test_probs_simple = torch.softmax(torch.tensor(test_logits_simple), dim=1).numpy()
     
-    # ========== 메타 스태킹 (Logistic Regression) ==========
+    # ========== 메타 스태킹 (OOF Leakage 방지) ==========
     print(f"\n{'='*80}")
-    print("메타 스태킹 (Stacking Meta-Model)")
+    print("메타 스태킹 (OOF Leakage 방지)")
     print(f"{'='*80}")
+    
+    # OOF Leakage 방지를 위한 Hold-out 분할
+    print("OOF Leakage 방지: Hold-out validation 사용")
+    X_meta_train, X_meta_val, y_meta_train, y_meta_val = train_test_split(
+        np.arange(len(oof_labels)), oof_labels, 
+        test_size=0.2, random_state=42, stratify=oof_labels
+    )
+    
+    print(f"메타 학습 데이터: {len(X_meta_train)}개")
+    print(f"메타 검증 데이터: {len(X_meta_val)}개")
     
     # OOF 확률을 메타 특징으로 사용
     # Shape: [N_train, 2*C] (iTransformer + TabTransformer)
@@ -1205,6 +1215,12 @@ def run_ultimate_experiment(args):
         agreement
     ])
     
+    # Hold-out 분할 적용
+    X_meta_train_features = oof_meta_features_extended[X_meta_train]
+    y_meta_train_labels = oof_labels[X_meta_train]
+    X_meta_val_features = oof_meta_features_extended[X_meta_val]
+    y_meta_val_labels = oof_labels[X_meta_val]
+    
     print(f"메타 특징 형태: {oof_meta_features_extended.shape}")
     print(f"  - 기본 확률: {num_classes * 2}개")
     print(f"  - 엔트로피: 2개")
@@ -1213,7 +1229,7 @@ def run_ultimate_experiment(args):
     print(f"  - Agreement: 1개")
     print(f"  - 총: {oof_meta_features_extended.shape[1]}개")
     
-    # 메타 모델 학습
+    # 메타 모델 학습 (Hold-out train 데이터만 사용)
     print(f"\n메타 모델 학습 중... (모델: {args.meta_model})")
     
     if args.meta_model == 'logistic':
@@ -1225,7 +1241,7 @@ def run_ultimate_experiment(args):
             C=1.0,
             class_weight='balanced'
         )
-        meta_model.fit(oof_meta_features_extended, oof_labels)
+        meta_model.fit(X_meta_train_features, y_meta_train_labels)
         
     elif args.meta_model == 'lightgbm':
         if not LIGHTGBM_AVAILABLE:
@@ -1238,7 +1254,7 @@ def run_ultimate_experiment(args):
                 C=1.0,
                 class_weight='balanced'
             )
-            meta_model.fit(oof_meta_features_extended, oof_labels)
+            meta_model.fit(X_meta_train_features, y_meta_train_labels)
         else:
             # LightGBM 파라미터
             params = {
@@ -1257,11 +1273,11 @@ def run_ultimate_experiment(args):
             }
             
             # 클래스 가중치 계산
-            class_counts = np.bincount(oof_labels)
-            class_weights = len(oof_labels) / (num_classes * class_counts)
-            sample_weights = class_weights[oof_labels]
+            class_counts = np.bincount(y_meta_train_labels)
+            class_weights = len(y_meta_train_labels) / (num_classes * class_counts)
+            sample_weights = class_weights[y_meta_train_labels]
             
-            train_data = lgb.Dataset(oof_meta_features_extended, label=oof_labels, weight=sample_weights)
+            train_data = lgb.Dataset(X_meta_train_features, label=y_meta_train_labels, weight=sample_weights)
             
             meta_model = lgb.train(
                 params,
@@ -1282,14 +1298,14 @@ def run_ultimate_experiment(args):
                 C=1.0,
                 class_weight='balanced'
             )
-            meta_model.fit(oof_meta_features_extended, oof_labels)
+            meta_model.fit(X_meta_train_features, y_meta_train_labels)
         else:
             # 클래스 가중치 계산
-            class_counts = np.bincount(oof_labels)
-            class_weights = len(oof_labels) / (num_classes * class_counts)
-            sample_weights = class_weights[oof_labels]
+            class_counts = np.bincount(y_meta_train_labels)
+            class_weights = len(y_meta_train_labels) / (num_classes * class_counts)
+            sample_weights = class_weights[y_meta_train_labels]
             
-            dtrain = xgb.DMatrix(oof_meta_features_extended, label=oof_labels, weight=sample_weights)
+            dtrain = xgb.DMatrix(X_meta_train_features, label=y_meta_train_labels, weight=sample_weights)
             
             params = {
                 'objective': 'multi:softprob',
@@ -1315,25 +1331,30 @@ def run_ultimate_experiment(args):
     else:
         raise ValueError(f"Unknown meta_model: {args.meta_model}")
     
-    # OOF 메타 예측
+    # OOF 메타 예측 (Hold-out validation 데이터로 평가)
     if args.meta_model == 'logistic':
-        oof_meta_preds = meta_model.predict(oof_meta_features_extended)
-        oof_meta_probs = meta_model.predict_proba(oof_meta_features_extended)
+        oof_meta_preds = meta_model.predict(X_meta_val_features)
+        oof_meta_probs = meta_model.predict_proba(X_meta_val_features)
     elif args.meta_model == 'lightgbm' and LIGHTGBM_AVAILABLE:
-        oof_meta_probs = meta_model.predict(oof_meta_features_extended)
+        oof_meta_probs = meta_model.predict(X_meta_val_features)
         oof_meta_preds = np.argmax(oof_meta_probs, axis=1)
     elif args.meta_model == 'xgboost' and XGBOOST_AVAILABLE:
-        doof = xgb.DMatrix(oof_meta_features_extended)
+        doof = xgb.DMatrix(X_meta_val_features)
         oof_meta_probs = meta_model.predict(doof)
         oof_meta_preds = np.argmax(oof_meta_probs, axis=1)
     else:
-        oof_meta_preds = meta_model.predict(oof_meta_features_extended)
-        oof_meta_probs = meta_model.predict_proba(oof_meta_features_extended)
+        oof_meta_preds = meta_model.predict(X_meta_val_features)
+        oof_meta_probs = meta_model.predict_proba(X_meta_val_features)
     
-    oof_meta_f1 = f1_score(oof_labels, oof_meta_preds, average='macro')
+    oof_meta_f1 = f1_score(y_meta_val_labels, oof_meta_preds, average='macro')
     
-    print(f"메타 모델 OOF Macro-F1: {oof_meta_f1:.4f}")
-    print(f"  vs Simple Weighted OOF F1: {f1_score(oof_labels, np.argmax(weight_itrans * oof_itransformer + weight_tabtrans * oof_tabtransformer, axis=1), average='macro'):.4f}")
+    # Simple Weighted 비교 (Hold-out validation 데이터로)
+    simple_weighted_val = weight_itrans * oof_itransformer[X_meta_val] + weight_tabtrans * oof_tabtransformer[X_meta_val]
+    simple_weighted_preds = np.argmax(simple_weighted_val, axis=1)
+    simple_weighted_f1_val = f1_score(y_meta_val_labels, simple_weighted_preds, average='macro')
+    
+    print(f"메타 모델 Hold-out F1: {oof_meta_f1:.4f}")
+    print(f"  vs Simple Weighted Hold-out F1: {simple_weighted_f1_val:.4f}")
     
     # Test 데이터 메타 특징 생성
     test_probs_itrans = torch.softmax(torch.tensor(test_logits_itrans_final), dim=1).numpy()
@@ -1377,24 +1398,25 @@ def run_ultimate_experiment(args):
         test_probs_meta = meta_model.predict_proba(test_meta_features_extended)
     
     print(f"\n메타 스태킹 완료!")
-    print(f"  - OOF F1 (iTransformer): {oof_f1_itrans:.4f}")
-    print(f"  - OOF F1 (TabTransformer): {oof_f1_tabtrans:.4f}")
-    print(f"  - OOF F1 (Simple Weighted): {f1_score(oof_labels, np.argmax(weight_itrans * oof_itransformer + weight_tabtrans * oof_tabtransformer, axis=1), average='macro'):.4f}")
-    print(f"  - OOF F1 (Meta Stacking): {oof_meta_f1:.4f}")
+    print(f"  - Hold-out F1 (iTransformer): {f1_score(y_meta_val_labels, np.argmax(oof_itransformer[X_meta_val], axis=1), average='macro'):.4f}")
+    print(f"  - Hold-out F1 (TabTransformer): {f1_score(y_meta_val_labels, np.argmax(oof_tabtransformer[X_meta_val], axis=1), average='macro'):.4f}")
+    print(f"  - Hold-out F1 (Simple Weighted): {simple_weighted_f1_val:.4f}")
+    print(f"  - Hold-out F1 (Meta Stacking): {oof_meta_f1:.4f}")
     
     # 메타 모델과 Simple Weighted 중 더 나은 것 선택
-    simple_weighted_f1 = f1_score(oof_labels, np.argmax(weight_itrans * oof_itransformer + weight_tabtrans * oof_tabtransformer, axis=1), average='macro')
-    
-    if oof_meta_f1 > simple_weighted_f1:
-        print(f"\n✅ 메타 스태킹이 더 우수합니다! (Δ = +{oof_meta_f1 - simple_weighted_f1:.4f})")
+    if oof_meta_f1 > simple_weighted_f1_val:
+        print(f"\n✅ 메타 스태킹이 더 우수합니다! (Δ = +{oof_meta_f1 - simple_weighted_f1_val:.4f})")
         test_probs_ensemble = test_probs_meta
         use_meta = True
     else:
-        print(f"\n⚠️ Simple Weighted가 더 우수합니다. (Δ = -{simple_weighted_f1 - oof_meta_f1:.4f})")
+        print(f"\n⚠️ Simple Weighted가 더 우수합니다. (Δ = -{simple_weighted_f1_val - oof_meta_f1:.4f})")
         test_probs_ensemble = test_probs_simple
         use_meta = False
     
     test_preds_ensemble = np.argmax(test_probs_ensemble, axis=1)
+    
+    # OOF 예측 (전체 데이터에 대해)
+    oof_pred_ensemble = np.argmax(weight_itrans * oof_itransformer + weight_tabtrans * oof_tabtransformer, axis=1)
     
     # ========== OVR & Pairwise 보정 ==========
     print(f"\n{'='*80}")
@@ -1649,10 +1671,10 @@ def run_ultimate_experiment(args):
         "true_label": oof_labels,
         "pred_label_itrans": oof_pred_itrans,
         "pred_label_tabtrans": oof_pred_tabtrans,
-        "pred_label_meta": oof_meta_preds if 'oof_meta_preds' in locals() else oof_pred_itrans,
+        "pred_label_ensemble": oof_pred_ensemble,
         **{f"prob_itrans_{i}": oof_itransformer[:, i] for i in range(num_classes)},
         **{f"prob_tabtrans_{i}": oof_tabtransformer[:, i] for i in range(num_classes)},
-        **{f"prob_meta_{i}": oof_meta_probs[:, i] if 'oof_meta_probs' in locals() else oof_itransformer[:, i] for i in range(num_classes)}
+        **{f"prob_meta_{i}": oof_itransformer[:, i] for i in range(num_classes)}  # 메타 모델은 Hold-out에서만 평가
     })
     oof_df.to_csv("ultimate_ensemble_oof.csv", index=False)
     print("✅ ultimate_ensemble_oof.csv")
