@@ -1119,6 +1119,7 @@ def run_ultimate_experiment(args):
                 train_ensemble=True,  # 앙상블 학습
                 stack_models=True,    # 스태킹 활성화
                 eval_metric='f1_macro',  # Macro-F1 평가
+                ml_task='multiclass_classification',  # 분류 작업 명시
                 validation_strategy={
                     'validation_type': 'split',
                     'train_ratio': 0.8,
